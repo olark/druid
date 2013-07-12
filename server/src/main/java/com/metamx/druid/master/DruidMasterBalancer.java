@@ -28,7 +28,6 @@ import com.metamx.druid.client.DruidServer;
 import com.metamx.emitter.EmittingLogger;
 import org.joda.time.DateTime;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -68,7 +67,7 @@ public class DruidMasterBalancer implements DruidMasterHelper
       if (holder.getLifetime() <= 0) {
         log.makeAlert("[%s]: Balancer move segments queue has a segment stuck", tier)
            .addData("segment", holder.getSegment().getIdentifier())
-           .addData("server", holder.getFromServer().getStringProps())
+           .addData("server", holder.getFromServer().getMetadata())
            .emit();
       }
     }
@@ -113,15 +112,16 @@ public class DruidMasterBalancer implements DruidMasterHelper
         continue;
       }
 
-      int iter = 0;
-      while (iter < maxSegmentsToMove) {
-        iter++;
-        final BalancerSegmentHolder segmentToMove = analyzer.pickSegmentToMove(serverHolderList, numSegments);
-        final ServerHolder holder = analyzer.findNewSegmentHomeBalance(segmentToMove.getSegment(), serverHolderList);
-        if (holder == null) {
-          continue;
+      for (int iter = 0; iter < maxSegmentsToMove; iter++) {
+        final BalancerSegmentHolder segmentToMove = analyzer.pickSegmentToMove(serverHolderList);
+
+        if (params.getAvailableSegments().contains(segmentToMove.getSegment())) {
+          final ServerHolder holder = analyzer.findNewSegmentHomeBalance(segmentToMove.getSegment(), serverHolderList);
+
+          if (holder != null) {
+            moveSegment(segmentToMove, holder.getServer(), params);
+          }
         }
-        moveSegment(segmentToMove, holder.getServer(), params);
       }
 
       final double initialTotalCost = analyzer.calculateInitialTotalCost(serverHolderList);

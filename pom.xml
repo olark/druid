@@ -23,7 +23,7 @@
     <groupId>com.metamx</groupId>
     <artifactId>druid</artifactId>
     <packaging>pom</packaging>
-    <version>0.3.30-SNAPSHOT</version>
+    <version>0.5.6-SNAPSHOT</version>
     <name>druid</name>
     <description>druid</description>
     <scm>
@@ -38,19 +38,20 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <metamx.java-util.version>0.21.0</metamx.java-util.version>
+        <metamx.java-util.version>0.22.3</metamx.java-util.version>
+        <apache.curator.version>2.1.0-incubating</apache.curator.version>
     </properties>
 
     <modules>
-        <module>common</module>
-        <module>index-common</module>
         <module>client</module>
-        <module>indexer</module>
-        <module>server</module>
-        <module>merger</module>
-        <module>realtime</module>
+        <module>common</module>
         <module>examples</module>
-        <module>druid-services</module>
+        <module>indexing-common</module>
+        <module>indexing-hadoop</module>
+        <module>indexing-service</module>
+        <module>realtime</module>
+        <module>server</module>
+        <module>services</module>
     </modules>
 
     <dependencyManagement>
@@ -59,17 +60,22 @@
             <dependency>
                 <groupId>com.metamx</groupId>
                 <artifactId>emitter</artifactId>
-                <version>0.2.0</version>
+                <version>0.2.3</version>
             </dependency>
             <dependency>
                 <groupId>com.metamx</groupId>
                 <artifactId>http-client</artifactId>
-                <version>0.7.0</version>
+                <version>0.7.1</version>
             </dependency>
             <dependency>
                 <groupId>com.metamx</groupId>
                 <artifactId>java-util</artifactId>
                 <version>${metamx.java-util.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.metamx</groupId>
+                <artifactId>bytebuffer-collections</artifactId>
+                <version>0.0.2</version>
             </dependency>
             <dependency>
                 <groupId>com.metamx</groupId>
@@ -118,29 +124,35 @@
                 <version>0.9</version>
             </dependency>
             <dependency>
-                <groupId>com.netflix.curator</groupId>
+                <groupId>org.apache.curator</groupId>
                 <artifactId>curator-client</artifactId>
-                <version>1.3.2</version>
+                <version>${apache.curator.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.netflix.curator</groupId>
+                <groupId>org.apache.curator</groupId>
                 <artifactId>curator-framework</artifactId>
-                <version>1.3.2</version>
+                <version>${apache.curator.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.netflix.curator</groupId>
+                <groupId>org.apache.curator</groupId>
                 <artifactId>curator-recipes</artifactId>
-                <version>1.3.2</version>
+                <version>${apache.curator.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.netflix.curator</groupId>
+                <groupId>org.apache.curator</groupId>
                 <artifactId>curator-x-discovery</artifactId>
-                <version>1.3.2</version>
+                <version>${apache.curator.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.netflix.curator</groupId>
-                <artifactId>curator-test</artifactId>
-                <version>1.2.2</version>
+                <groupId>org.apache.hadoop</groupId>
+                <artifactId>hadoop-core</artifactId>
+                <version>0.20.2</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.mortbay.jetty</groupId>
+                        <artifactId>servlet-api-2.5</artifactId>
+                    </exclusion>
+                </exclusions>
             </dependency>
             <dependency>
                 <groupId>it.uniroma3.mat</groupId>
@@ -150,7 +162,7 @@
             <dependency>
                 <groupId>com.google.guava</groupId>
                 <artifactId>guava</artifactId>
-                <version>11.0.1</version>
+                <version>14.0.1</version>
             </dependency>
             <dependency>
                 <groupId>com.google.inject</groupId>
@@ -168,24 +180,24 @@
                 <version>4.8.1</version>
             </dependency>
             <dependency>
-              <groupId>com.fasterxml.jackson.core</groupId>
-              <artifactId>jackson-annotations</artifactId>
-              <version>2.1.4</version>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-annotations</artifactId>
+                <version>2.1.4</version>
             </dependency>
             <dependency>
-              <groupId>com.fasterxml.jackson.core</groupId>
-              <artifactId>jackson-core</artifactId>
-              <version>2.1.4</version>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-core</artifactId>
+                <version>2.1.4</version>
             </dependency>
             <dependency>
-              <groupId>com.fasterxml.jackson.core</groupId>
-              <artifactId>jackson-databind</artifactId>
-              <version>2.1.4</version>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>2.1.4</version>
             </dependency>
             <dependency>
-              <groupId>com.fasterxml.jackson.datatype</groupId>
-              <artifactId>jackson-datatype-guava</artifactId>
-              <version>2.1.2</version>
+                <groupId>com.fasterxml.jackson.datatype</groupId>
+                <artifactId>jackson-datatype-guava</artifactId>
+                <version>2.1.2</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson.datatype</groupId>
@@ -201,16 +213,6 @@
                 <groupId>com.fasterxml.jackson.jaxrs</groupId>
                 <artifactId>jackson-jaxrs-json-provider</artifactId>
                 <version>2.1.4</version>
-            </dependency>
-            <dependency>
-                <groupId>org.codehaus.jackson</groupId>
-                <artifactId>jackson-core-asl</artifactId>
-                <version>1.9.11</version>
-            </dependency>
-            <dependency>
-                <groupId>org.codehaus.jackson</groupId>
-                <artifactId>jackson-mapper-asl</artifactId>
-                <version>1.9.11</version>
             </dependency>
             <dependency>
                 <groupId>javax.inject</groupId>
@@ -251,12 +253,17 @@
                 <groupId>org.mortbay.jetty</groupId>
                 <artifactId>jetty</artifactId>
                 <version>6.1.26</version>
-                    <exclusions>
-                        <exclusion>
-                            <groupId>org.mortbay.jetty</groupId>
-                            <artifactId>servlet-api</artifactId>
-                        </exclusion>
-                    </exclusions>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.mortbay.jetty</groupId>
+                        <artifactId>servlet-api</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>org.mortbay.jetty</groupId>
+                <artifactId>jetty-util</artifactId>
+                <version>6.1.26</version>
             </dependency>
             <dependency>
                 <groupId>joda-time</groupId>
@@ -284,11 +291,6 @@
                 <version>1.6.2</version>
             </dependency>
             <dependency>
-                <groupId>com.github.sgroschupf</groupId>
-                <artifactId>zkclient</artifactId>
-                <version>0.1</version>
-            </dependency>
-            <dependency>
                 <groupId>com.google.code.simple-spring-memcached</groupId>
                 <artifactId>spymemcached</artifactId>
                 <version>2.8.4</version>
@@ -308,6 +310,23 @@
                 <artifactId>commons-cli</artifactId>
                 <version>1.2</version>
             </dependency>
+            <dependency>
+                <groupId>org.codehaus.jackson</groupId>
+                <artifactId>jackson-core-asl</artifactId>
+                <version>1.9.11</version>
+            </dependency>
+            <dependency>
+                <groupId>org.codehaus.jackson</groupId>
+                <artifactId>jackson-mapper-asl</artifactId>
+                <version>1.9.11</version>
+            </dependency>
+            <dependency>
+                <groupId>net.jpountz.lz4</groupId>
+                <artifactId>lz4</artifactId>
+                <version>1.1.2</version>
+            </dependency>
+
+
             <!-- Test Scope -->
             <dependency>
                 <groupId>com.metamx</groupId>
@@ -316,7 +335,6 @@
                 <scope>test</scope>
                 <version>${metamx.java-util.version}</version>
             </dependency>
-
             <dependency>
                 <groupId>org.easymock</groupId>
                 <artifactId>easymock</artifactId>
@@ -333,6 +351,12 @@
                 <groupId>com.google.caliper</groupId>
                 <artifactId>caliper</artifactId>
                 <version>0.5-rc1</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.curator</groupId>
+                <artifactId>curator-test</artifactId>
+                <version>${apache.curator.version}</version>
                 <scope>test</scope>
             </dependency>
 
@@ -403,6 +427,11 @@
                     <groupId>org.antlr</groupId>
                     <artifactId>antlr4-maven-plugin</artifactId>
                     <version>4.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-assembly-plugin</artifactId>
+                    <version>2.4</version>
                 </plugin>
             </plugins>
         </pluginManagement>

@@ -23,12 +23,12 @@
     <groupId>com.metamx.druid</groupId>
     <artifactId>druid-server</artifactId>
     <name>druid-server</name>
-    <description>druid-server</description>
+    <description>Druid Server</description>
 
     <parent>
         <groupId>com.metamx</groupId>
         <artifactId>druid</artifactId>
-        <version>0.3.30-SNAPSHOT</version>
+        <version>0.5.6-SNAPSHOT</version>
     </parent>
 
     <dependencies>
@@ -39,7 +39,7 @@
         </dependency>
         <dependency>
             <groupId>com.metamx.druid</groupId>
-            <artifactId>druid-index-common</artifactId>
+            <artifactId>druid-indexing-common</artifactId>
             <version>${project.parent.version}</version>
         </dependency>
 
@@ -81,11 +81,11 @@
             <artifactId>config-magic</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.netflix.curator</groupId>
+            <groupId>org.apache.curator</groupId>
             <artifactId>curator-framework</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.netflix.curator</groupId>
+            <groupId>org.apache.curator</groupId>
             <artifactId>curator-x-discovery</artifactId>
         </dependency>
         <dependency>
@@ -169,8 +169,8 @@
             <artifactId>slf4j-log4j12</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.github.sgroschupf</groupId>
-            <artifactId>zkclient</artifactId>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-core</artifactId>
         </dependency>
 
         <!-- Dependencies required for jets3t b/c emr pom doesn't include them -->
@@ -194,6 +194,11 @@
             <artifactId>java-xmlbuilder</artifactId>
             <optional>true</optional>
         </dependency>
+        <dependency>
+            <groupId>com.netflix.astyanax</groupId>
+            <artifactId>astyanax</artifactId>
+            <version>1.0.1</version>
+        </dependency>
         <!-- Dependencies required for jets3t -->
 
         <!-- Tests -->
@@ -209,11 +214,24 @@
         </dependency>
         <dependency>
             <groupId>com.metamx.druid</groupId>
-            <artifactId>druid-index-common</artifactId>
+            <artifactId>druid-indexing-common</artifactId>
             <version>${project.parent.version}</version>
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.metamx.druid</groupId>
+            <artifactId>druid-client</artifactId>
+            <version>${project.parent.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.curator</groupId>
+            <artifactId>curator-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
 
     </dependencies>
 

@@ -85,6 +85,12 @@ public class ServerManagerTest
         new SegmentLoader()
         {
           @Override
+          public boolean isSegmentLoaded(DataSegment segment) throws SegmentLoadingException
+          {
+            return false;
+          }
+
+          @Override
           public Segment getSegment(final DataSegment segment)
           {
             return new SegmentForTesting(
@@ -199,7 +205,6 @@ public class ServerManagerTest
             new Pair<String, Interval>("2", new Interval("2011-04-04T05/2011-04-04T06"))
         )
     );
-
 
     assertQueryable(
         QueryGranularity.HOUR,

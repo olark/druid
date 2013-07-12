@@ -21,10 +21,12 @@ package com.metamx.druid.index.v1;
 
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
+import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.metamx.collections.spatial.search.Bound;
 import com.metamx.common.IAE;
 import com.metamx.common.guava.FunctionalIterable;
 import com.metamx.common.guava.FunctionalIterator;
@@ -43,6 +45,7 @@ import com.metamx.druid.index.v1.serde.ComplexMetrics;
 import com.metamx.druid.kv.IndexedInts;
 import com.metamx.druid.processing.ComplexMetricSelector;
 import com.metamx.druid.processing.FloatMetricSelector;
+import com.metamx.druid.processing.ObjectColumnSelector;
 import com.metamx.druid.query.search.SearchHit;
 import com.metamx.druid.query.search.SearchQuery;
 import com.metamx.druid.query.search.SearchQuerySpec;
@@ -61,6 +64,8 @@ import java.util.concurrent.ConcurrentNavigableMap;
  */
 public class IncrementalIndexStorageAdapter implements StorageAdapter
 {
+  private static final Splitter SPLITTER = Splitter.on(",");
+
   private final IncrementalIndex index;
 
   public IncrementalIndexStorageAdapter(
@@ -114,7 +119,8 @@ public class IncrementalIndexStorageAdapter implements StorageAdapter
   public Iterable<Cursor> makeCursors(final Filter filter, final Interval interval, final QueryGranularity gran)
   {
     Interval actualIntervalTmp = interval;
-    Interval dataInterval = getInterval();
+
+    final Interval dataInterval = new Interval(getMinTime().getMillis(), gran.next(getMaxTime().getMillis()));
     if (!actualIntervalTmp.overlaps(dataInterval)) {
       return ImmutableList.of();
     }
@@ -221,7 +227,7 @@ public class IncrementalIndexStorageAdapter implements StorageAdapter
                             numAdvanced++;
                           }
                         } else {
-                          Iterators.skip(baseIter, numAdvanced);
+                          Iterators.advance(baseIter, numAdvanced);
                           if (baseIter.hasNext()) {
                             currEntry.set(baseIter.next());
                           }
@@ -359,6 +365,65 @@ public class IncrementalIndexStorageAdapter implements StorageAdapter
                           }
                         };
                       }
+
+                      @Override
+                      public ObjectColumnSelector makeObjectColumnSelector(String column)
+                      {
+                        final String columnName = column.toLowerCase();
+                        final Integer metricIndexInt = index.getMetricIndex(columnName);
+
+                        if (metricIndexInt != null) {
+                          final int metricIndex = metricIndexInt;
+
+                          final ComplexMetricSerde serde = ComplexMetrics.getSerdeForType(index.getMetricType(columnName));
+
+                          return new ObjectColumnSelector()
+                          {
+                            @Override
+                            public Class classOfObject()
+                            {
+                              return serde.getObjectStrategy().getClazz();
+                            }
+
+                            @Override
+                            public Object get()
+                            {
+                              return currEntry.getValue()[metricIndex].get();
+                            }
+                          };
+                        }
+
+                        final Integer dimensionIndexInt = index.getDimensionIndex(columnName);
+
+                        if (dimensionIndexInt != null) {
+                          final int dimensionIndex = dimensionIndexInt;
+                          return new ObjectColumnSelector<String>()
+                          {
+                            @Override
+                            public Class classOfObject()
+                            {
+                              return String.class;
+                            }
+
+                            @Override
+                            public String get()
+                            {
+                              final String[] dimVals = currEntry.getKey().getDims()[dimensionIndex];
+                              if (dimVals.length == 1) {
+                                return dimVals[0];
+                              }
+                              if (dimVals.length == 0) {
+                                return null;
+                              }
+                              throw new UnsupportedOperationException(
+                                  "makeObjectColumnSelector does not support multivalued columns"
+                              );
+                            }
+                          };
+                        }
+
+                        return null;
+                      }
                     };
                   }
                 }
@@ -449,6 +514,7 @@ public class IncrementalIndexStorageAdapter implements StorageAdapter
       }
     }
 
+
     return new FunctionalIterable<SearchHit>(retVal).limit(query.getLimit());
   }
 
@@ -470,6 +536,7 @@ public class IncrementalIndexStorageAdapter implements StorageAdapter
 
     public void set(Map.Entry<IncrementalIndex.TimeAndDims, Aggregator[]> currEntry)
     {
+      this.currEntry = currEntry;
       this.currEntry = currEntry;
     }
 
@@ -557,7 +624,44 @@ public class IncrementalIndexStorageAdapter implements StorageAdapter
           return false;
         }
       };
+    }
 
+    @Override
+    public ValueMatcher makeValueMatcher(final String dimension, final Bound bound)
+    {
+      if (!dimension.endsWith(".geo")) {
+        return new BooleanValueMatcher(false);
+      }
+
+      Integer dimIndexObject = index.getDimensionIndex(dimension.toLowerCase());
+      if (dimIndexObject == null) {
+        return new BooleanValueMatcher(false);
+      }
+      final int dimIndex = dimIndexObject;
+
+      return new ValueMatcher()
+      {
+        @Override
+        public boolean matches()
+        {
+          String[][] dims = holder.getKey().getDims();
+          if (dimIndex >= dims.length || dims[dimIndex] == null) {
+            return false;
+          }
+
+          for (String dimVal : dims[dimIndex]) {
+            List<String> stringCoords = Lists.newArrayList(SPLITTER.split(dimVal));
+            float[] coords = new float[stringCoords.size()];
+            for (int j = 0; j < coords.length; j++) {
+              coords[j] = Float.valueOf(stringCoords.get(j));
+            }
+            if (bound.contains(coords)) {
+              return true;
+            }
+          }
+          return false;
+        }
+      };
     }
   }
 }

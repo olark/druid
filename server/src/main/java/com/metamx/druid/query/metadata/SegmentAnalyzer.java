@@ -23,7 +23,6 @@ import com.google.common.base.Charsets;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
-import com.google.common.primitives.Floats;
 import com.google.common.primitives.Longs;
 import com.metamx.common.logger.Logger;
 import com.metamx.druid.index.QueryableIndex;
@@ -36,7 +35,6 @@ import com.metamx.druid.index.v1.serde.ComplexMetricSerde;
 import com.metamx.druid.index.v1.serde.ComplexMetrics;
 
 import java.util.Map;
-
 
 public class SegmentAnalyzer
 {
@@ -107,7 +105,7 @@ public class SegmentAnalyzer
       return ColumnAnalysis.error("multi_value");
     }
 
-    return new ColumnAnalysis(capabilities.getType(), column.getLength() * numBytes, null);
+    return new ColumnAnalysis(capabilities.getType(), column.getLength() * numBytes, null, null);
   }
 
   public ColumnAnalysis analyzeStringColumn(Column column)
@@ -127,7 +125,7 @@ public class SegmentAnalyzer
         }
       }
 
-      return new ColumnAnalysis(capabilities.getType(), size, cardinality);
+      return new ColumnAnalysis(capabilities.getType(), size, cardinality, null);
     }
 
     return ColumnAnalysis.error("string_no_bitmap");
@@ -155,6 +153,6 @@ public class SegmentAnalyzer
       size += inputSizeFn.apply(complexColumn.getRowValue(i));
     }
 
-    return new ColumnAnalysis(capabilities.getType(), size, null);
+    return new ColumnAnalysis(capabilities.getType(), size, null, null);
   }
 }

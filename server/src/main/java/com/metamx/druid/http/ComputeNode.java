@@ -26,35 +26,26 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
 import com.metamx.common.ISE;
 import com.metamx.common.concurrent.ExecutorServiceConfig;
-import com.metamx.common.concurrent.ExecutorServices;
 import com.metamx.common.config.Config;
 import com.metamx.common.lifecycle.Lifecycle;
 import com.metamx.common.logger.Logger;
 import com.metamx.druid.BaseServerNode;
-import com.metamx.druid.client.DruidServer;
-import com.metamx.druid.client.DruidServerConfig;
 import com.metamx.druid.coordination.ServerManager;
 import com.metamx.druid.coordination.ZkCoordinator;
 import com.metamx.druid.coordination.ZkCoordinatorConfig;
 import com.metamx.druid.initialization.Initialization;
 import com.metamx.druid.initialization.ServerInit;
 import com.metamx.druid.jackson.DefaultObjectMapper;
-import com.metamx.druid.loading.SegmentLoaderConfig;
 import com.metamx.druid.loading.SegmentLoader;
 import com.metamx.druid.metrics.ServerMonitor;
 import com.metamx.druid.query.MetricsEmittingExecutorService;
+import com.metamx.druid.query.PrioritizedExecutorService;
 import com.metamx.druid.query.QueryRunnerFactoryConglomerate;
-import com.metamx.druid.utils.PropUtils;
 import com.metamx.emitter.service.ServiceEmitter;
 import com.metamx.emitter.service.ServiceMetricEvent;
 import com.metamx.metrics.Monitor;
-
-
 import org.jets3t.service.S3ServiceException;
-import org.jets3t.service.impl.rest.httpclient.RestS3Service;
-import org.jets3t.service.security.AWSCredentials;
 import org.mortbay.jetty.servlet.Context;
-import org.mortbay.jetty.servlet.DefaultServlet;
 import org.mortbay.jetty.servlet.ServletHolder;
 import org.skife.config.ConfigurationObjectFactory;
 
@@ -73,7 +64,6 @@ public class ComputeNode extends BaseServerNode<ComputeNode>
     return new Builder();
   }
 
-  private DruidServer druidServer;
   private SegmentLoader segmentLoader;
 
   public ComputeNode(
@@ -84,7 +74,7 @@ public class ComputeNode extends BaseServerNode<ComputeNode>
       ConfigurationObjectFactory configFactory
   )
   {
-    super(log, props, lifecycle, jsonMapper, smileMapper, configFactory);
+    super("historical", log, props, lifecycle, jsonMapper, smileMapper, configFactory);
   }
 
   public ComputeNode setSegmentLoader(SegmentLoader segmentLoader)
@@ -94,59 +84,46 @@ public class ComputeNode extends BaseServerNode<ComputeNode>
     return this;
   }
 
-  public ComputeNode setDruidServer(DruidServer druidServer)
-  {
-    Preconditions.checkState(this.druidServer == null, "Cannot set druidServer once it has already been set.");
-    this.druidServer = druidServer;
-    return this;
-  }
-
-  public DruidServer getDruidServer()
-  {
-    initializeDruidServer();
-    return druidServer;
-  }
-
   public SegmentLoader getSegmentLoader()
   {
-    initializeAdapterLoader();
+    initializeSegmentLoader();
     return segmentLoader;
   }
 
   protected void doInit() throws Exception
   {
-    initializeDruidServer();
-    initializeAdapterLoader();
-
     final Lifecycle lifecycle = getLifecycle();
     final ServiceEmitter emitter = getEmitter();
     final List<Monitor> monitors = getMonitors();
     final QueryRunnerFactoryConglomerate conglomerate = getConglomerate();
 
+    final PrioritizedExecutorService innerExecutorService = PrioritizedExecutorService.create(
+        getLifecycle(),
+        getConfigFactory().buildWithReplacements(
+            ExecutorServiceConfig.class, ImmutableMap.of("base_path", "druid.processing")
+        )
+    );
+
     final ExecutorService executorService = new MetricsEmittingExecutorService(
-        ExecutorServices.create(
-            getLifecycle(),
-            getConfigFactory().buildWithReplacements(
-                ExecutorServiceConfig.class, ImmutableMap.of("base_path", "druid.processing")
-            )
-        ),
+        innerExecutorService,
         emitter,
         new ServiceMetricEvent.Builder()
     );
 
-    final ServerManager serverManager = new ServerManager(segmentLoader, conglomerate, emitter, executorService);
+    final ServerManager serverManager = new ServerManager(getSegmentLoader(), conglomerate, emitter, executorService);
 
     final ZkCoordinator coordinator = new ZkCoordinator(
         getJsonMapper(),
         getConfigFactory().build(ZkCoordinatorConfig.class),
-        druidServer,
-        getPhoneBook(),
-        serverManager,
-        emitter
+        getZkPaths(),
+        getDruidServerMetadata(),
+        getAnnouncer(),
+        getCuratorFramework(),
+        serverManager
     );
     lifecycle.addManagedInstance(coordinator);
 
-    monitors.add(new ServerMonitor(getDruidServer(), serverManager));
+    monitors.add(new ServerMonitor(getDruidServerMetadata(), serverManager));
     startMonitoring(monitors);
 
     final Context root = new Context(getServer(), "/", Context.SESSIONS);
@@ -159,32 +136,17 @@ public class ComputeNode extends BaseServerNode<ComputeNode>
     );
   }
 
-  private void initializeAdapterLoader()
+  private void initializeSegmentLoader()
   {
     if (segmentLoader == null) {
-      final Properties props = getProps();
       try {
-        final RestS3Service s3Client = new RestS3Service(
-            new AWSCredentials(
-                PropUtils.getProperty(props, "com.metamx.aws.accessKey"),
-                PropUtils.getProperty(props, "com.metamx.aws.secretKey")
-            )
-        );
-
         setSegmentLoader(
-            ServerInit.makeDefaultQueryableLoader(s3Client, getConfigFactory().build(SegmentLoaderConfig.class))
+            ServerInit.makeDefaultQueryableLoader(getConfigFactory(), getProps())
         );
       }
       catch (S3ServiceException e) {
         throw Throwables.propagate(e);
       }
-    }
-  }
-
-  private void initializeDruidServer()
-  {
-    if (druidServer == null) {
-      setDruidServer(new DruidServer(getConfigFactory().build(DruidServerConfig.class), "historical"));
     }
   }
 

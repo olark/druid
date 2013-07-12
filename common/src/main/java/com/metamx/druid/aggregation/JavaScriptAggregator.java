@@ -20,8 +20,7 @@
 package com.metamx.druid.aggregation;
 
 import com.google.common.collect.Lists;
-import com.metamx.druid.processing.FloatMetricSelector;
-import org.mozilla.javascript.Context;
+import com.metamx.druid.processing.ObjectColumnSelector;
 
 import java.util.List;
 
@@ -29,7 +28,7 @@ public class JavaScriptAggregator implements Aggregator
 {
   static interface ScriptAggregator
   {
-    public double aggregate(double current, FloatMetricSelector[] selectorList);
+    public double aggregate(double current, ObjectColumnSelector[] selectorList);
 
     public double combine(double a, double b);
 
@@ -39,15 +38,15 @@ public class JavaScriptAggregator implements Aggregator
   }
 
   private final String name;
-  private final FloatMetricSelector[] selectorList;
+  private final ObjectColumnSelector[] selectorList;
   private final ScriptAggregator script;
 
   private volatile double current;
 
-  public JavaScriptAggregator(String name, List<FloatMetricSelector> selectorList, ScriptAggregator script)
+  public JavaScriptAggregator(String name, List<ObjectColumnSelector> selectorList, ScriptAggregator script)
   {
     this.name = name;
-    this.selectorList = Lists.newArrayList(selectorList).toArray(new FloatMetricSelector[]{});
+    this.selectorList = Lists.newArrayList(selectorList).toArray(new ObjectColumnSelector[]{});
     this.script = script;
 
     this.current = script.reset();

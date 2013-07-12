@@ -25,8 +25,6 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.Maps;
 import com.google.common.primitives.Ints;
 import com.metamx.common.logger.Logger;
-import com.metamx.emitter.service.ServiceEmitter;
-import com.metamx.emitter.service.ServiceEventBuilder;
 import net.spy.memcached.AddrUtil;
 import net.spy.memcached.ConnectionFactoryBuilder;
 import net.spy.memcached.DefaultHashAlgorithm;
@@ -55,9 +53,10 @@ public class MemcachedCache implements Cache
   public static MemcachedCache create(final MemcachedCacheConfig config)
   {
     try {
-      SerializingTranscoder transcoder = new SerializingTranscoder(config.getMaxObjectSize());
-      // disable compression
-      transcoder.setCompressionThreshold(Integer.MAX_VALUE);
+      LZ4Transcoder transcoder = new LZ4Transcoder(config.getMaxObjectSize());
+
+      // always use compression
+      transcoder.setCompressionThreshold(0);
 
       return new MemcachedCache(
         new MemcachedClient(
