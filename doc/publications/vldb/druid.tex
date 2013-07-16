@@ -103,8 +103,6 @@
 % author on the opening page (as the 'third row') but we ask,
 % for aesthetic reasons that you place these 'additional authors'
 % in the \additional authors block, viz.
-\additionalauthors{Michael Driscoll (Metamarkets, \texttt{mike@metamarkets.com})}
-\date{21 March 2013}
 % Just remember to make sure that the TOTAL number of authors
 % is the number that will appear on the first page PLUS the
 % number that will appear in the \additionalauthors section.
@@ -112,31 +110,84 @@
 \maketitle
 
 \begin{abstract}
-Druid is an open source\footnote{\href{https://github.com/metamx/druid}{https://github.com/metamx/druid}}, real-time analytical data store that supports
-fast ad-hoc queries on large-scale data sets. The system combines a
-column-oriented data layout, a shared-nothing architecture, and an advanced
-indexing structure to allow for the arbitrary exploration of billion-row
-tables with sub-second latencies. Druid scales horizontally and is the
-core engine of the Metamarkets data analytics platform. In this paper, we detail Druid's architecture, and describe how it supports real-time data ingestion and interactive analytical queries. 
+Druid is an open-source\footnote{\href{https://github.com/metamx/druid}{https://github.com/metamx/druid}} scalable, real-time analytical data store that supports ad-hoc queries on large-scale data sets. The system combines a columnar data layout, a shared-nothing architecture, and an advanced indexing structure to allow arbitrary exploration of billion-row tables with sub-second latencies. Druid scales horizontally and is the core engine of the Metamarkets platform. In this paper, we detail the architecture and implementation of Druid and describe how it solves the real-time data ingestion problem.
 \end{abstract}
 
 \section{Introduction}
-Enterprises routinely collect diverse data sets that can contain up to terabytes of information per day. Companies are increasingly realizing the importance of efficiently storing and analyzing this data in order to increase both productivity and profitability. Numerous database systems (e.g., IBM’s Netezza \cite{singh2011introduction}, HP's Vertica \cite{bear2012vertica}, EMC’s Greenplum \cite{miner2012unified}) and several research papers \cite{barroso2009datacenter, chaudhuri1997overview, dewitt1992parallel} offer solutions for how to store and extract information from large data sets. However, many of these Relational Database Management Systems (RDBMS) and NoSQL architectures do not support interactive queries and real-time data ingestion.
+In recent years, the proliferation of internet technology and usage has created a surge in the amount of machine-generated data.  Individually, each of these pieces of information is rather low-value and information sparse.  Meaning that a lot of companies were willing to let this data just disappear rather than spend the time and resources on extracting information from it.  Infrastructure to handle this type of data was built (IBM's Netezza\cite{singh2011introduction}, Vertica\cite{bear2012vertica}, and EMC's Greenplum\cite{miner2012unified}) and written about\cite{barroso2009datacenter, chaudhuri1997overview, dewitt1992parallel}, but they largely sold at high price points that targetted only those companies who could afford the software.
 
-<<<<<<< HEAD:publications/vldb/druid.tex
-Metamarkets built Druid to directly address the need for a real-time analytical data store in the big-data ecosystem. Druid shares some similarities with main-memory databases \cite{farber2012sap} and interactive query systems such as Dremel \cite{melnik2010dremel} and PowerDrill \cite{hall2012processing}. Druid's focus is fast aggregations, arbitrarily deep data exploration, and low-latency data ingestion. Furthermore, Druid is highly configurable and allows users to easily adjust fault tolerance and performance properties. Queries on in-memory data typically complete in millseconds, and real-time data ingestion means that new events are immediately available for analysis.
-=======
-Metamarkets built Druid to directly address the need for a real-time analytical data store in the big-data ecosystem. Druid shares some similarities with main-memory databases \cite{farber2012sap} and interactive query systems such as Dremel \cite{melnik2010dremel} and PowerDrill \cite{hall2012processing}. Druid's focus is fast aggregations, arbitrarily deep data exploration, and low-latency data ingestion. Furthermore, Druid is highly configurable and allows users to easily adjust fault tolerance and performance properties. Queries on in-memory data typically complete in milliseconds, and real-time data ingestion means that new events are immediately available for analysis.
->>>>>>> master:doc/publications/vldb/druid.tex
+Google initially introduced MapReduce as their mechanism of leveraging commodity hardware\cite{cite-required} to index the internet and analyse logs.  The Hadoop project is largely patterned after the insights that came out of that original MapReduce paper from Google and is currently deployed in many different organizations for the long-term storage and analysis of large amounts of log data.  This has done a lot to help companies convert their low-value event streams into high-value aggregates to leverage in recommender systems, business intelligence and A-B testing infrastructure.
 
-In this paper, we make the following contributions:
-\begin{itemize}
-\item We describe Druid’s real-time data ingestion implementation.
-\item We detail how the architecture enables fast multi-dimensional data exploration.
-\item We present Druid performance benchmarks.
-\end{itemize} 
+However, as with a lot of great systems, the introduction of the Hadoop has opened our eyes to a new space of problems.  Specifically, Hadoop excels at storing and providing access to large amounts of data, it does not, however, make any performance guarantees around how quickly you can access that data.  It is also a highly available system, but it could be better at handling significant concurrent load.  Lastly, while Hadoop is good at storing data once it is in the system, it is not optimized for getting data into the system and making it immediately readable.
 
-The outline is as follows: Section \ref{sec:data-model} describes the Druid data model. Section \ref{sec:cluster} presents an overview of the components of a Druid cluster. Section \ref{sec:query-api} outlines the query API. Section \ref{sec:storage} describes data storage format in greater detail. Section \ref{sec:robustness} discusses Druid robustness and failure responsiveness. Section \ref{sec:benchmarks} presents experiments benchmarking query performance. Section \ref{sec:related} discusses related work and Section \ref{sec:conclusions} presents our conclusions.
+Early on in the development of the Metamarkets product, we ran into each of these issues and came to the realization that Hadoop is a great back-office, batch processing and data warehousing system.  But, as a company that needs to have product-level guarantees around query performance and data availability in a highly concurrent environment (1000+ users), it wasn't going to meet our needs.  We then explored the space of solutions to our specific problem, and, after trying both Relational Database Management Systems and NoSQL architectures, we came to the conclusion that there was nothing yet in the open source space which could be adjusted to solve our problem.
+
+We ended up creating Druid, an open-source, distributed, column-oriented, realtime analytical data store.  In many ways, Druid shares similarities with other interactive query systems \cite{melnik2010dremel}, main-memory databases \cite{farber2012sap}, and widely-known distributed data stores such as BigTable \cite{chang2008bigtable}, Dynamo \cite{decandia2007dynamo}, and Cassandra \cite{lakshman2010cassandra}.  It's distribution model and query model also borrow ideas from current generation search infrastructure \cite{paper-on-solr/lucene?, paper-on-sensei-db?, paper-on-elastic-search?}
+
+This paper describes the architecture of Druid, explores the various design decisions made in creating an always-on production system that powers a hosted service, and attempts to help inform anyone who faces a similar problem about a potential method of solving it.
+
+The paper starts out describing the problem in Section \ref{sec:problem-definition}.  It then continues on to describe the architecture of the system from the point of view of how data flows through the system in Section \ref{sec:architecture}.  We discuss how and why data gets converted into a binary format in Section \ref{sec:data-model}.  Lastly, we leave off with some benchmarks in Section \ref{sec:benchmarks}, Related Work in Section \ref{sec:related} and Conclusions in Section \ref{sec:conclusions}.
+
+\section{Problem Definition}
+\label{sec:problem-definition}
+
+I think we should break this up into three subsections:
+
+\subsection{The Users}
+
+Let's describe the users of our system, what problem they have: i.e. data transparency issues.  They have a large amount of data and they want to be able to see what is actually going on inside of it.  Let's get some ad tech examples and throw them in if we can.
+
+\subsection{The Data}
+
+Let's describe what the data looks like.  This should probably tie back into the issues that the Users want to resolve described in the above subsection
+
+\subsection{The Product}
+
+Let's describe the overall idea of the ``faceted search dashboard'' on top of event streams.  Essentially, we decided that exposing a dashboard that incorporates the faceted-search metaphor for exploring time-series would resolve the issues that the Users have.
+
+\section{Architecture}
+\label{sec:architecture}
+
+Let's make this a flow of how data flows through the system.  So, take the stuff from sec:cluster and organize it as the subsections listed below.  We should be able to include the robustness concerns of each piece in its own section and perhaps not need the robustness section anymore?
+
+\subsection{Message Bus}
+
+\subsection{Realtime Node}
+
+\subsection{Deep Storage}
+
+\subsection{Coordinator}
+
+\subsection{Historical Node}
+
+\subsection{ZooKeeper}
+
+\subsection{Broker Node}
+
+\section{Data Model}
+\label{sec:data-model}
+
+Let's break this up into
+
+\subsection{Block}
+
+Discuss what a block of data is and that we index it.
+
+\subsection{Segment}
+
+A chunk of a block, self-contained, etc.
+
+\subsection{Binary format}
+
+sec:storage can probably make sense here
+
+\subsection{Bitmap Indexes}
+
+How we build them, why we use them and CONCISE
+
+
+
+====================================== end Eric edits
 
 \section{Data Model}
 \label{sec:data-model}
