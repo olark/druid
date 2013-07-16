@@ -24,7 +24,6 @@ import com.google.common.base.Predicate;
 import javax.annotation.Nullable;
 import java.util.regex.Pattern;
 
-
 /**
  */
 public class RegexFilter extends DimensionPredicateFilter
@@ -41,9 +40,9 @@ public class RegexFilter extends DimensionPredicateFilter
           Pattern compiled = Pattern.compile(pattern);
 
           @Override
-          public boolean apply(@Nullable String input)
+          public boolean apply(String input)
           {
-            return compiled.matcher(input).find();
+            return (input != null) && compiled.matcher(input).find();
           }
         }
     );

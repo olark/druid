@@ -22,12 +22,12 @@ package com.metamx.druid.aggregation;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Charsets;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Lists;
 import com.google.common.primitives.Floats;
 import com.google.common.primitives.Longs;
-import com.metamx.druid.processing.MetricSelectorFactory;
+import com.metamx.druid.processing.ColumnSelectorFactory;
 import org.apache.commons.codec.binary.Base64;
-
-
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -51,14 +51,20 @@ public class HistogramAggregatorFactory implements AggregatorFactory
       @JsonProperty("breaks") final List<Float> breaksList
   )
   {
+    Preconditions.checkNotNull(name, "Must have a valid, non-null aggregator name");
+    Preconditions.checkNotNull(fieldName, "Must have a valid, non-null fieldName");
+
     this.name = name;
     this.fieldName = fieldName;
-    this.breaksList = breaksList;
-    this.breaks = new float[breaksList.size()];
-    for(int i = 0; i < breaksList.size(); ++i) this.breaks[i] = breaksList.get(i);
+    this.breaksList = (breaksList == null) ? Lists.<Float>newArrayList() :breaksList;
+    this.breaks = new float[this.breaksList.size()];
+    for (int i = 0; i < this.breaksList.size(); ++i) {
+      this.breaks[i] = this.breaksList.get(i);
+    }
   }
+
   @Override
-  public Aggregator factorize(MetricSelectorFactory metricFactory)
+  public Aggregator factorize(ColumnSelectorFactory metricFactory)
   {
     return new HistogramAggregator(
         name,
@@ -68,7 +74,7 @@ public class HistogramAggregatorFactory implements AggregatorFactory
   }
 
   @Override
-  public BufferAggregator factorizeBuffered(MetricSelectorFactory metricFactory)
+  public BufferAggregator factorizeBuffered(ColumnSelectorFactory metricFactory)
   {
     return new HistogramBufferAggregator(
         metricFactory.makeFloatMetricSelector(fieldName),
@@ -97,14 +103,12 @@ public class HistogramAggregatorFactory implements AggregatorFactory
   @Override
   public Object deserialize(Object object)
   {
-    if (object instanceof byte []) {
-      return Histogram.fromBytes((byte []) object);
-    }
-    else if (object instanceof ByteBuffer) {
+    if (object instanceof byte[]) {
+      return Histogram.fromBytes((byte[]) object);
+    } else if (object instanceof ByteBuffer) {
       return Histogram.fromBytes((ByteBuffer) object);
-    }
-    else if(object instanceof String) {
-      byte[] bytes = Base64.decodeBase64(((String)object).getBytes(Charsets.UTF_8));
+    } else if (object instanceof String) {
+      byte[] bytes = Base64.decodeBase64(((String) object).getBytes(Charsets.UTF_8));
       return Histogram.fromBytes(bytes);
     }
     return object;
@@ -113,7 +117,7 @@ public class HistogramAggregatorFactory implements AggregatorFactory
   @Override
   public Object finalizeComputation(Object object)
   {
-    return ((Histogram)object).asVisual();
+    return ((Histogram) object).asVisual();
   }
 
   @Override
@@ -151,7 +155,7 @@ public class HistogramAggregatorFactory implements AggregatorFactory
   @Override
   public String getTypeName()
   {
-     throw new UnsupportedOperationException("HistogramAggregatorFactory does not support getTypeName()");
+    throw new UnsupportedOperationException("HistogramAggregatorFactory does not support getTypeName()");
   }
 
   @Override

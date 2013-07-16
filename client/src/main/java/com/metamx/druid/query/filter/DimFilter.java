@@ -19,7 +19,6 @@
 
 package com.metamx.druid.query.filter;
 
-
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
@@ -34,7 +33,8 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
     @JsonSubTypes.Type(name="extraction", value=ExtractionDimFilter.class),
     @JsonSubTypes.Type(name="regex", value=RegexDimFilter.class),
     @JsonSubTypes.Type(name="search", value=SearchQueryDimFilter.class),
-    @JsonSubTypes.Type(name="javascript", value=JavaScriptDimFilter.class)
+    @JsonSubTypes.Type(name="javascript", value=JavaScriptDimFilter.class),
+    @JsonSubTypes.Type(name="spatial", value=SpatialDimFilter.class)
 })
 public interface DimFilter
 {

@@ -71,6 +71,62 @@ public class DbConnector
     );
   }
 
+  public static void createTaskTable(final DBI dbi, final String taskTableName)
+  {
+    createTable(
+        dbi,
+        taskTableName,
+        String.format(
+            "CREATE TABLE `%s` (\n"
+            + "  `id` varchar(255) NOT NULL,\n"
+            + "  `created_date` tinytext NOT NULL,\n"
+            + "  `datasource` varchar(255) NOT NULL,\n"
+            + "  `payload` longblob NOT NULL,\n"
+            + "  `status_payload` longblob NOT NULL,\n"
+            + "  `active` tinyint(1) NOT NULL DEFAULT '0',\n"
+            + "  PRIMARY KEY (`id`)\n"
+            + ")",
+            taskTableName
+        )
+    );
+  }
+
+  public static void createTaskLogTable(final DBI dbi, final String taskLogsTableName)
+  {
+    createTable(
+        dbi,
+        taskLogsTableName,
+        String.format(
+            "CREATE TABLE `%s` (\n"
+            + "  `id` bigint(20) NOT NULL AUTO_INCREMENT,\n"
+            + "  `task_id` varchar(255) DEFAULT NULL,\n"
+            + "  `log_payload` longblob,\n"
+            + "  PRIMARY KEY (`id`),\n"
+            + "  KEY `task_id` (`task_id`)\n"
+            + ")",
+            taskLogsTableName
+        )
+    );
+  }
+
+  public static void createTaskLockTable(final DBI dbi, final String taskLocksTableName)
+  {
+    createTable(
+        dbi,
+        taskLocksTableName,
+        String.format(
+            "CREATE TABLE `%s` (\n"
+            + "  `id` bigint(20) NOT NULL AUTO_INCREMENT,\n"
+            + "  `task_id` varchar(255) DEFAULT NULL,\n"
+            + "  `lock_payload` longblob,\n"
+            + "  PRIMARY KEY (`id`),\n"
+            + "  KEY `task_id` (`task_id`)\n"
+            + ")",
+            taskLocksTableName
+        )
+    );
+  }
+
   public static void createTable(
       final DBI dbi,
       final String tableName,
@@ -84,15 +140,16 @@ public class DbConnector
             @Override
             public Void withHandle(Handle handle) throws Exception
             {
-              List<Map<String, Object>> table = handle.select(String.format("SHOW tables LIKE '%s'", tableName));
+              if ( !handle.getConnection().getMetaData().getDatabaseProductName().contains("PostgreSQL") ) {
+                List<Map<String, Object>> table = handle.select(String.format("SHOW tables LIKE '%s'", tableName));
 
-              if (table.isEmpty()) {
-                log.info("Creating table[%s]", tableName);
-                handle.createStatement(sql).execute();
-              } else {
-                log.info("Table[%s] existed: [%s]", tableName, table);
+                if (table.isEmpty()) {
+                  log.info("Creating table[%s]", tableName);
+                  handle.createStatement(sql).execute();
+                } else {
+                  log.info("Table[%s] existed: [%s]", tableName, table);
+                }
               }
-
               return null;
             }
           }
@@ -124,6 +181,11 @@ public class DbConnector
     dataSource.setUsername(config.getDatabaseUser());
     dataSource.setPassword(config.getDatabasePassword());
     dataSource.setUrl(config.getDatabaseConnectURI());
+
+    if (config.useValidationQuery()) {
+      dataSource.setValidationQuery(config.getValidationQuery());
+      dataSource.setTestOnBorrow(true);
+    }
 
     return dataSource;
   }

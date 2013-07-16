@@ -20,6 +20,7 @@
 package com.metamx.druid.coordination;
 
 import com.google.common.base.Function;
+import com.google.common.base.Predicates;
 import com.google.common.collect.Ordering;
 import com.metamx.common.ISE;
 import com.metamx.common.guava.FunctionalIterable;
@@ -102,6 +103,11 @@ public class ServerManager implements QuerySegmentWalker
     synchronized (dataSourceCounts) {
       return dataSourceCounts.snapshot();
     }
+  }
+
+  public boolean isSegmentCached(final DataSegment segment) throws SegmentLoadingException
+  {
+    return segmentLoader.isSegmentLoaded(segment);
   }
 
   public void loadSegment(final DataSegment segment) throws SegmentLoadingException
@@ -249,9 +255,13 @@ public class ServerManager implements QuerySegmentWalker
                             );
                           }
                         }
-                    );
+                    )
+                    .filter(Predicates.<QueryRunner<T>>notNull());
               }
             }
+        )
+        .filter(
+            Predicates.<QueryRunner<T>>notNull()
         );
 
     return new FinalizeResultsQueryRunner<T>(toolChest.mergeResults(factory.mergeRunners(exec, adapters)), toolChest);
@@ -269,7 +279,6 @@ public class ServerManager implements QuerySegmentWalker
     }
 
     final QueryToolChest<T, Query<T>> toolChest = factory.getToolchest();
-
 
     final VersionedIntervalTimeline<String, Segment> timeline = dataSources.get(query.getDataSource());
 
@@ -305,6 +314,9 @@ public class ServerManager implements QuerySegmentWalker
                 );
               }
             }
+        )
+        .filter(
+            Predicates.<QueryRunner<T>>notNull()
         );
 
     return new FinalizeResultsQueryRunner<T>(toolChest.mergeResults(factory.mergeRunners(exec, adapters)), toolChest);

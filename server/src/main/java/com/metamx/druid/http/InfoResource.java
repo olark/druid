@@ -29,12 +29,11 @@ import com.google.common.collect.Sets;
 import com.metamx.druid.client.DataSegment;
 import com.metamx.druid.client.DruidDataSource;
 import com.metamx.druid.client.DruidServer;
-import com.metamx.druid.client.ServerInventoryManager;
-import com.metamx.druid.coordination.DruidClusterInfo;
+import com.metamx.druid.client.InventoryView;
+import com.metamx.druid.client.indexing.IndexingServiceClient;
 import com.metamx.druid.db.DatabaseRuleManager;
 import com.metamx.druid.db.DatabaseSegmentManager;
 import com.metamx.druid.master.DruidMaster;
-import com.metamx.druid.client.indexing.IndexingServiceClient;
 import com.metamx.druid.master.rules.Rule;
 import org.joda.time.Interval;
 
@@ -61,28 +60,62 @@ import java.util.TreeSet;
 @Path("/info")
 public class InfoResource
 {
+  private static final Function<DruidServer, Map<String, Object>> simplifyClusterFn =
+      new Function<DruidServer, Map<String, Object>>()
+      {
+        @Override
+        public Map<String, Object> apply(DruidServer server)
+        {
+          return new ImmutableMap.Builder<String, Object>()
+              .put("host", server.getHost())
+              .put("type", server.getType())
+              .put("tier", server.getTier())
+              .put("currSize", server.getCurrSize())
+              .put("maxSize", server.getMaxSize())
+              .put(
+                  "segments",
+                  Collections2.transform(
+                      server.getSegments().values(),
+                      new Function<DataSegment, Map<String, Object>>()
+                      {
+                        @Override
+                        public Map<String, Object> apply(DataSegment segment)
+                        {
+                          return new ImmutableMap.Builder<String, Object>()
+                              .put("id", segment.getIdentifier())
+                              .put("dataSource", segment.getDimensions())
+                              .put("interval", segment.getInterval())
+                              .put("version", segment.getVersion())
+                              .put("size", segment.getSize())
+                              .build();
+                        }
+                      }
+                  )
+              )
+              .build();
+        }
+      };
+
   private final DruidMaster master;
-  private final ServerInventoryManager serverInventoryManager;
+  private final InventoryView serverInventoryView;
   private final DatabaseSegmentManager databaseSegmentManager;
   private final DatabaseRuleManager databaseRuleManager;
-  private final DruidClusterInfo druidClusterInfo;
   private final IndexingServiceClient indexingServiceClient;
 
   @Inject
   public InfoResource(
       DruidMaster master,
-      ServerInventoryManager serverInventoryManager,
+      InventoryView serverInventoryView,
       DatabaseSegmentManager databaseSegmentManager,
       DatabaseRuleManager databaseRuleManager,
-      DruidClusterInfo druidClusterInfo,
+      @Nullable
       IndexingServiceClient indexingServiceClient
   )
   {
     this.master = master;
-    this.serverInventoryManager = serverInventoryManager;
+    this.serverInventoryView = serverInventoryView;
     this.databaseSegmentManager = databaseSegmentManager;
     this.databaseRuleManager = databaseRuleManager;
-    this.druidClusterInfo = druidClusterInfo;
     this.indexingServiceClient = indexingServiceClient;
   }
 
@@ -92,18 +125,27 @@ public class InfoResource
   public Response getMaster()
   {
     return Response.status(Response.Status.OK)
-                   .entity(druidClusterInfo.lookupCurrentLeader())
+                   .entity(master.getCurrentMaster())
                    .build();
   }
 
   @GET
   @Path("/cluster")
   @Produces("application/json")
-  public Response getClusterInfo()
+  public Response getClusterInfo(
+      @QueryParam("full") String full
+  )
   {
-    return Response.status(Response.Status.OK)
-                   .entity(serverInventoryManager.getInventory())
-                   .build();
+    if (full != null) {
+      return Response.ok(serverInventoryView.getInventory())
+                     .build();
+    }
+    return Response.ok(
+        Iterables.transform(
+            serverInventoryView.getInventory(),
+            simplifyClusterFn
+        )
+    ).build();
   }
 
   @GET
@@ -115,12 +157,12 @@ public class InfoResource
   {
     Response.ResponseBuilder builder = Response.status(Response.Status.OK);
     if (full != null) {
-      return builder.entity(serverInventoryManager.getInventory()).build();
+      return builder.entity(serverInventoryView.getInventory()).build();
     }
 
     return builder.entity(
         Iterables.transform(
-            serverInventoryManager.getInventory(),
+            serverInventoryView.getInventory(),
             new Function<DruidServer, String>()
             {
               @Override
@@ -141,7 +183,7 @@ public class InfoResource
   )
   {
     Response.ResponseBuilder builder = Response.status(Response.Status.OK);
-    DruidServer server = serverInventoryManager.getInventoryValue(serverName);
+    DruidServer server = serverInventoryView.getInventoryValue(serverName);
     if (server == null) {
       return Response.status(Response.Status.NOT_FOUND).build();
     }
@@ -160,7 +202,7 @@ public class InfoResource
   )
   {
     Response.ResponseBuilder builder = Response.status(Response.Status.OK);
-    DruidServer server = serverInventoryManager.getInventoryValue(serverName);
+    DruidServer server = serverInventoryView.getInventoryValue(serverName);
     if (server == null) {
       return Response.status(Response.Status.NOT_FOUND).build();
     }
@@ -192,7 +234,7 @@ public class InfoResource
       @PathParam("segmentId") String segmentId
   )
   {
-    DruidServer server = serverInventoryManager.getInventoryValue(serverName);
+    DruidServer server = serverInventoryView.getInventoryValue(serverName);
     if (server == null) {
       return Response.status(Response.Status.NOT_FOUND).build();
     }
@@ -217,7 +259,7 @@ public class InfoResource
       return builder.entity(
           Iterables.concat(
               Iterables.transform(
-                  serverInventoryManager.getInventory(),
+                  serverInventoryView.getInventory(),
                   new Function<DruidServer, Iterable<DataSegment>>()
                   {
                     @Override
@@ -234,7 +276,7 @@ public class InfoResource
     return builder.entity(
         Iterables.concat(
             Iterables.transform(
-                serverInventoryManager.getInventory(),
+                serverInventoryView.getInventory(),
                 new Function<DruidServer, Iterable<String>>()
                 {
                   @Override
@@ -265,7 +307,7 @@ public class InfoResource
       @PathParam("segmentId") String segmentId
   )
   {
-    for (DruidServer server : serverInventoryManager.getInventory()) {
+    for (DruidServer server : serverInventoryView.getInventory()) {
       if (server.getSegments().containsKey(segmentId)) {
         return Response.status(Response.Status.OK)
                        .entity(server.getSegments().get(segmentId))
@@ -282,7 +324,7 @@ public class InfoResource
   public Response getTiers()
   {
     Set<String> tiers = Sets.newHashSet();
-    for (DruidServer server : serverInventoryManager.getInventory()) {
+    for (DruidServer server : serverInventoryView.getInventory()) {
       tiers.add(server.getTier());
     }
     return Response.status(Response.Status.OK)
@@ -304,11 +346,16 @@ public class InfoResource
   @Path("/rules/{dataSourceName}")
   @Produces("application/json")
   public Response getDatasourceRules(
-      @PathParam("dataSourceName") final String dataSourceName
+      @PathParam("dataSourceName") final String dataSourceName,
+      @QueryParam("full") final String full
+
   )
   {
-    return Response.status(Response.Status.OK)
-                   .entity(databaseRuleManager.getRules(dataSourceName))
+    if (full != null) {
+      return Response.ok(databaseRuleManager.getRulesWithDefault(dataSourceName))
+                     .build();
+    }
+    return Response.ok(databaseRuleManager.getRules(dataSourceName))
                    .build();
   }
 
@@ -353,21 +400,6 @@ public class InfoResource
     ).build();
   }
 
-  @GET
-  @Path("/datasources/{dataSourceName}")
-  @Produces("application/json")
-  public Response getSegmentDataSource(
-      @PathParam("dataSourceName") final String dataSourceName
-  )
-  {
-    DruidDataSource dataSource = getDataSource(dataSourceName.toLowerCase());
-    if (dataSource == null) {
-      return Response.status(Response.Status.NOT_FOUND).build();
-    }
-
-    return Response.status(Response.Status.OK).entity(dataSource).build();
-  }
-
   @DELETE
   @Path("/datasources/{dataSourceName}")
   public Response deleteDataSource(
@@ -376,6 +408,11 @@ public class InfoResource
       @QueryParam("interval") final String interval
   )
   {
+    // This is weird enough to have warranted some sort of T0D0 comment at one point, but it will likely be all
+    // rewritten once Guice introduced, and that's the brunt of the information that was in the original T0D0 too.
+    if (indexingServiceClient == null) {
+      return Response.status(Response.Status.OK).entity(ImmutableMap.of("error", "no indexing service found")).build();
+    }
     if (kill != null && Boolean.valueOf(kill)) {
       indexingServiceClient.killSegments(dataSourceName, new Interval(interval));
     } else {
@@ -489,7 +526,7 @@ public class InfoResource
     Iterable<DruidDataSource> dataSources =
         Iterables.concat(
             Iterables.transform(
-                serverInventoryManager.getInventory(),
+                serverInventoryView.getInventory(),
                 new Function<DruidServer, DruidDataSource>()
                 {
                   @Override
@@ -543,7 +580,7 @@ public class InfoResource
         Lists.newArrayList(
             Iterables.concat(
                 Iterables.transform(
-                    serverInventoryManager.getInventory(),
+                    serverInventoryView.getInventory(),
                     new Function<DruidServer, Iterable<DruidDataSource>>()
                     {
                       @Override

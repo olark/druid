@@ -42,6 +42,7 @@ public class IndexMergerTest
   public void testPersistCaseInsensitive() throws Exception
   {
     final long timestamp = System.currentTimeMillis();
+
     IncrementalIndex toPersist = IncrementalIndexTest.createCaseInsensitiveIndex(timestamp);
 
     final File tempDir = Files.createTempDir();
@@ -80,7 +81,6 @@ public class IndexMergerTest
             ImmutableMap.<String, Object>of("DIm1", "1", "DIM2", "2", "dim1", "5", "dim2", "6")
         )
     );
-
 
     final File tempDir1 = Files.createTempDir();
     final File tempDir2 = Files.createTempDir();

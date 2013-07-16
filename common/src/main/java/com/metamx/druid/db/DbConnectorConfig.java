@@ -19,7 +19,6 @@
 
 package com.metamx.druid.db;
 
-
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.skife.config.Config;
 
@@ -42,4 +41,16 @@ public abstract class DbConnectorConfig
   @JsonProperty("segmentTable")
   @Config("druid.database.segmentTable")
   public abstract String getSegmentTable();
+
+  @JsonProperty("useValidationQuery")
+  @Config("druid.database.validation")
+  public boolean useValidationQuery() {
+    return false;
+  }
+
+  @JsonProperty("validationQuery")
+  @Config("druid.database.validationQuery")
+  public String getValidationQuery() {
+    return "SELECT 1";
+  }
 }

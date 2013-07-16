@@ -21,7 +21,6 @@ package com.metamx.druid.master.rules;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.MinMaxPriorityQueue;
-import com.metamx.common.Pair;
 import com.metamx.druid.client.DataSegment;
 import com.metamx.druid.master.BalancerCostAnalyzer;
 import com.metamx.druid.master.DruidMaster;
@@ -63,16 +62,18 @@ public abstract class LoadRule implements Rule
     final DateTime referenceTimestamp = params.getBalancerReferenceTimestamp();
     final BalancerCostAnalyzer analyzer = params.getBalancerCostAnalyzer(referenceTimestamp);
 
-    stats.accumulate(
-        assign(
-            params.getReplicationManager(),
-            expectedReplicants,
-            totalReplicants,
-            analyzer,
-            serverHolderList,
-            segment
-        )
-    );
+    if (params.getAvailableSegments().contains(segment)) {
+      stats.accumulate(
+          assign(
+              params.getReplicationManager(),
+              expectedReplicants,
+              totalReplicants,
+              analyzer,
+              serverHolderList,
+              segment
+          )
+      );
+    }
 
     stats.accumulate(drop(expectedReplicants, clusterReplicants, segment, params));
 

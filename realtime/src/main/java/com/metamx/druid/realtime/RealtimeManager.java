@@ -36,6 +36,7 @@ import com.metamx.druid.query.QueryRunnerFactoryConglomerate;
 import com.metamx.druid.query.QueryToolChest;
 import com.metamx.druid.query.segment.QuerySegmentWalker;
 import com.metamx.druid.query.segment.SegmentDescriptor;
+import com.metamx.druid.realtime.firehose.Firehose;
 import com.metamx.druid.realtime.plumber.Plumber;
 import com.metamx.druid.realtime.plumber.Sink;
 import com.metamx.emitter.EmittingLogger;
@@ -185,7 +186,7 @@ public class RealtimeManager implements QuerySegmentWalker
             }
           }
           catch (FormattedException e) {
-            log.info(e, "unparseable line");
+            log.info(e, "unparseable line: %s", e.getDetails());
             metrics.incrementUnparseable();
             continue;
           }
@@ -225,7 +226,7 @@ public class RealtimeManager implements QuerySegmentWalker
       QueryRunnerFactory<T, Query<T>> factory = conglomerate.findFactory(query);
       QueryToolChest<T, Query<T>> toolChest = factory.getToolchest();
 
-      return new FinalizeResultsQueryRunner<T>(toolChest.mergeResults(plumber.getQueryRunner(query)), toolChest);
+      return new FinalizeResultsQueryRunner<T>(plumber.getQueryRunner(query), toolChest);
     }
 
     public void close() throws IOException

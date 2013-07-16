@@ -21,10 +21,9 @@ package com.metamx.druid.aggregation;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.base.Preconditions;
 import com.google.common.primitives.Longs;
-import com.metamx.druid.processing.MetricSelectorFactory;
-
-
+import com.metamx.druid.processing.ColumnSelectorFactory;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -46,12 +45,15 @@ public class LongSumAggregatorFactory implements AggregatorFactory
       @JsonProperty("fieldName") final String fieldName
   )
   {
+    Preconditions.checkNotNull(name, "Must have a valid, non-null aggregator name");
+    Preconditions.checkNotNull(fieldName, "Must have a valid, non-null fieldName");
+
     this.name = name;
     this.fieldName = fieldName;
   }
 
   @Override
-  public Aggregator factorize(MetricSelectorFactory metricFactory)
+  public Aggregator factorize(ColumnSelectorFactory metricFactory)
   {
     return new LongSumAggregator(
         name,
@@ -60,7 +62,7 @@ public class LongSumAggregatorFactory implements AggregatorFactory
   }
 
   @Override
-  public BufferAggregator factorizeBuffered(MetricSelectorFactory metricFactory)
+  public BufferAggregator factorizeBuffered(ColumnSelectorFactory metricFactory)
   {
     return new LongSumBufferAggregator(metricFactory.makeFloatMetricSelector(fieldName));
   }

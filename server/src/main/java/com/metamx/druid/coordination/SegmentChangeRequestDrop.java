@@ -24,9 +24,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import com.metamx.druid.client.DataSegment;
 
-
-
-
 /**
  */
 public class SegmentChangeRequestDrop implements DataSegmentChangeRequest
@@ -43,7 +40,6 @@ public class SegmentChangeRequestDrop implements DataSegmentChangeRequest
 
   @JsonProperty
   @JsonUnwrapped
-  @Override
   public DataSegment getSegment()
   {
     return segment;

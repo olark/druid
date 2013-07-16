@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.Module;
@@ -34,8 +35,6 @@ import com.metamx.common.logger.Logger;
 import com.metamx.druid.QueryableNode;
 import com.metamx.druid.client.BrokerServerView;
 import com.metamx.druid.client.CachingClusteredClient;
-import com.metamx.druid.client.ClientConfig;
-import com.metamx.druid.client.ClientInventoryManager;
 import com.metamx.druid.client.cache.Cache;
 import com.metamx.druid.client.cache.CacheConfig;
 import com.metamx.druid.client.cache.CacheMonitor;
@@ -43,6 +42,8 @@ import com.metamx.druid.client.cache.MapCache;
 import com.metamx.druid.client.cache.MapCacheConfig;
 import com.metamx.druid.client.cache.MemcachedCache;
 import com.metamx.druid.client.cache.MemcachedCacheConfig;
+import com.metamx.druid.curator.discovery.ServiceAnnouncer;
+import com.metamx.druid.curator.discovery.ServiceInstanceFactory;
 import com.metamx.druid.initialization.Initialization;
 import com.metamx.druid.initialization.ServiceDiscoveryConfig;
 import com.metamx.druid.jackson.DefaultObjectMapper;
@@ -53,16 +54,17 @@ import com.metamx.http.client.HttpClient;
 import com.metamx.http.client.HttpClientConfig;
 import com.metamx.http.client.HttpClientInit;
 import com.metamx.metrics.Monitor;
-import com.netflix.curator.framework.CuratorFramework;
-import com.netflix.curator.x.discovery.ServiceDiscovery;
-
-
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.x.discovery.ServiceDiscovery;
 import org.mortbay.jetty.servlet.Context;
 import org.mortbay.jetty.servlet.ServletHolder;
+import org.mortbay.servlet.GzipFilter;
 import org.skife.config.ConfigurationObjectFactory;
 
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  */
@@ -97,7 +99,7 @@ public class BrokerNode extends QueryableNode<BrokerNode>
       ConfigurationObjectFactory configFactory
   )
   {
-    super(log, props, lifecycle, jsonMapper, smileMapper, configFactory);
+    super("broker", log, props, lifecycle, jsonMapper, smileMapper, configFactory);
   }
 
   public QueryToolChestWarehouse getWarehouse()
@@ -190,20 +192,20 @@ public class BrokerNode extends QueryableNode<BrokerNode>
     monitors.add(new CacheMonitor(cache));
     startMonitoring(monitors);
 
-    final BrokerServerView view = new BrokerServerView(warehouse, getSmileMapper(), brokerHttpClient);
-    final ClientInventoryManager clientInventoryManager = new ClientInventoryManager(
-        getConfigFactory().build(ClientConfig.class), getPhoneBook(), view
+    final ExecutorService viewExec = Executors.newFixedThreadPool(
+        1, new ThreadFactoryBuilder().setDaemon(true).setNameFormat("BrokerServerView-%s").build()
     );
-    lifecycle.addManagedInstance(clientInventoryManager);
+    final BrokerServerView view = new BrokerServerView(
+        warehouse, getSmileMapper(), brokerHttpClient, getServerView(), viewExec
+    );
 
     final CachingClusteredClient baseClient = new CachingClusteredClient(warehouse, view, cache, getSmileMapper());
     lifecycle.addManagedInstance(baseClient);
 
-
     final ClientQuerySegmentWalker texasRanger = new ClientQuerySegmentWalker(warehouse, getEmitter(), baseClient);
 
     List<Module> theModules = Lists.newArrayList();
-    theModules.add(new ClientServletModule(texasRanger, clientInventoryManager, getJsonMapper()));
+    theModules.add(new ClientServletModule(texasRanger, getInventoryView(), getJsonMapper()));
     theModules.addAll(extraModules);
 
     final Injector injector = Guice.createInjector(theModules);
@@ -213,9 +215,10 @@ public class BrokerNode extends QueryableNode<BrokerNode>
         new ServletHolder(new QueryServlet(getJsonMapper(), getSmileMapper(), texasRanger, getEmitter(), getRequestLogger())),
         "/druid/v2/*"
     );
+    root.addFilter(GzipFilter.class, "/*", 0);
 
     root.addEventListener(new GuiceServletConfig(injector));
-    root.addFilter(GuiceFilter.class, "/*", 0);
+    root.addFilter(GuiceFilter.class, "/druid/v2/datasources/*", 0);
 
     for (String path : pathsForGuiceFilter) {
       root.addFilter(GuiceFilter.class, path, 0);
@@ -226,15 +229,17 @@ public class BrokerNode extends QueryableNode<BrokerNode>
   {
     if (useDiscovery) {
       final Lifecycle lifecycle = getLifecycle();
-
       final ServiceDiscoveryConfig serviceDiscoveryConfig = getConfigFactory().build(ServiceDiscoveryConfig.class);
-      CuratorFramework curatorFramework = Initialization.makeCuratorFrameworkClient(
+      final CuratorFramework curatorFramework = Initialization.makeCuratorFramework(
           serviceDiscoveryConfig, lifecycle
       );
-
       final ServiceDiscovery serviceDiscovery = Initialization.makeServiceDiscoveryClient(
           curatorFramework, serviceDiscoveryConfig, lifecycle
       );
+      final ServiceAnnouncer serviceAnnouncer = Initialization.makeServiceAnnouncer(
+          serviceDiscoveryConfig, serviceDiscovery
+      );
+      Initialization.announceDefaultService(serviceDiscoveryConfig, serviceAnnouncer, lifecycle);
     }
   }
 

@@ -21,11 +21,10 @@ package com.metamx.druid.aggregation;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.primitives.Longs;
-import com.metamx.druid.processing.MetricSelectorFactory;
-
-
+import com.metamx.druid.processing.ColumnSelectorFactory;
 
 import java.util.Comparator;
 import java.util.List;
@@ -42,17 +41,19 @@ public class CountAggregatorFactory implements AggregatorFactory
       @JsonProperty("name") String name
   )
   {
+    Preconditions.checkNotNull(name, "Must have a valid, non-null aggregator name");
+
     this.name = name;
   }
 
   @Override
-  public Aggregator factorize(MetricSelectorFactory metricFactory)
+  public Aggregator factorize(ColumnSelectorFactory metricFactory)
   {
     return new CountAggregator(name);
   }
 
   @Override
-  public BufferAggregator factorizeBuffered(MetricSelectorFactory metricFactory)
+  public BufferAggregator factorizeBuffered(ColumnSelectorFactory metricFactory)
   {
     return new CountBufferAggregator();
   }

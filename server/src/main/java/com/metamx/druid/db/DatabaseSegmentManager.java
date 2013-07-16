@@ -121,9 +121,8 @@ public class DatabaseSegmentManager
         return;
       }
 
-      dataSources.set(new ConcurrentHashMap<String, DruidDataSource>());
-
       started = false;
+      dataSources.set(new ConcurrentHashMap<String, DruidDataSource>());
     }
   }
 
@@ -204,7 +203,7 @@ public class DatabaseSegmentManager
               for (DataSegment segment : segments) {
                 batch.add(
                     String.format(
-                        "UPDATE %s SET used=1 WHERE id = '%s'",
+                        "UPDATE %s SET used=true WHERE id = '%s'",
                         config.getSegmentTable(),
                         segment.getIdentifier()
                     )
@@ -235,7 +234,7 @@ public class DatabaseSegmentManager
             public Void withHandle(Handle handle) throws Exception
             {
               handle.createStatement(
-                  String.format("UPDATE %s SET used=1 WHERE id = :id", config.getSegmentTable())
+                  String.format("UPDATE %s SET used=true WHERE id = :id", config.getSegmentTable())
               )
                     .bind("id", segmentId)
                     .execute();
@@ -251,7 +250,6 @@ public class DatabaseSegmentManager
 
     return true;
   }
-
 
   public boolean removeDatasource(final String ds)
   {
@@ -270,7 +268,7 @@ public class DatabaseSegmentManager
             public Void withHandle(Handle handle) throws Exception
             {
               handle.createStatement(
-                  String.format("UPDATE %s SET used=0 WHERE dataSource = :dataSource", config.getSegmentTable())
+                  String.format("UPDATE %s SET used=false WHERE dataSource = :dataSource", config.getSegmentTable())
               )
                     .bind("dataSource", ds)
                     .execute();
@@ -300,7 +298,7 @@ public class DatabaseSegmentManager
             public Void withHandle(Handle handle) throws Exception
             {
               handle.createStatement(
-                  String.format("UPDATE %s SET used=0 WHERE id = :segmentID", config.getSegmentTable())
+                  String.format("UPDATE %s SET used=false WHERE id = :segmentID", config.getSegmentTable())
               ).bind("segmentID", segmentID)
                     .execute();
 
@@ -387,8 +385,11 @@ public class DatabaseSegmentManager
   public void poll()
   {
     try {
-      ConcurrentHashMap<String, DruidDataSource> newDataSources
-          = new ConcurrentHashMap<String, DruidDataSource>();
+      if (!started) {
+        return;
+      }
+
+      ConcurrentHashMap<String, DruidDataSource> newDataSources = new ConcurrentHashMap<String, DruidDataSource>();
 
       List<Map<String, Object>> segmentRows = dbi.withHandle(
           new HandleCallback<List<Map<String, Object>>>()
@@ -397,7 +398,7 @@ public class DatabaseSegmentManager
             public List<Map<String, Object>> withHandle(Handle handle) throws Exception
             {
               return handle.createQuery(
-                  String.format("SELECT payload FROM %s WHERE used=1", config.getSegmentTable())
+                  String.format("SELECT payload FROM %s WHERE used=true", config.getSegmentTable())
               ).list();
             }
           }
@@ -440,10 +441,14 @@ public class DatabaseSegmentManager
         }
       }
 
-      dataSources.set(newDataSources);
+      synchronized (lock) {
+        if (started) {
+          dataSources.set(newDataSources);
+        }
+      }
     }
     catch (Exception e) {
-      log.error(e, e.toString());
+      log.error(e, "Problem polling DB.");
     }
   }
 }

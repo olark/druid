@@ -25,6 +25,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Maps;
 import com.google.common.io.Closeables;
+import com.metamx.collections.spatial.ImmutableRTree;
 import com.metamx.common.collect.MoreIterators;
 import com.metamx.common.guava.FunctionalIterable;
 import com.metamx.common.guava.FunctionalIterator;
@@ -35,6 +36,7 @@ import com.metamx.druid.index.QueryableIndex;
 import com.metamx.druid.index.brita.BitmapIndexSelector;
 import com.metamx.druid.index.brita.Filter;
 import com.metamx.druid.index.column.Column;
+import com.metamx.druid.index.column.ColumnCapabilities;
 import com.metamx.druid.index.column.ColumnSelector;
 import com.metamx.druid.index.column.ComplexColumn;
 import com.metamx.druid.index.column.DictionaryEncodedColumn;
@@ -48,10 +50,12 @@ import com.metamx.druid.kv.IndexedInts;
 import com.metamx.druid.kv.IndexedIterable;
 import com.metamx.druid.processing.ComplexMetricSelector;
 import com.metamx.druid.processing.FloatMetricSelector;
+import com.metamx.druid.processing.ObjectColumnSelector;
 import it.uniroma3.mat.extendedset.intset.ImmutableConciseSet;
 import org.joda.time.DateTime;
 import org.joda.time.Interval;
 
+import java.io.Closeable;
 import java.util.Iterator;
 import java.util.Map;
 
@@ -133,7 +137,9 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
   public Iterable<Cursor> makeCursors(Filter filter, Interval interval, QueryGranularity gran)
   {
     Interval actualInterval = interval;
-    final Interval dataInterval = getInterval();
+
+    final Interval dataInterval = new Interval(getMinTime().getMillis(), gran.next(getMaxTime().getMillis()));
+
     if (!actualInterval.overlaps(dataInterval)) {
       return ImmutableList.of();
     }
@@ -222,6 +228,32 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
   }
 
   @Override
+  public ImmutableConciseSet getInvertedIndex(String dimension, int idx)
+  {
+    final Column column = index.getColumn(dimension.toLowerCase());
+    if (column == null) {
+      return new ImmutableConciseSet();
+    }
+    if (!column.getCapabilities().hasBitmapIndexes()) {
+      return new ImmutableConciseSet();
+    }
+    // This is a workaround given the current state of indexing, I feel shame
+    final int index = column.getBitmapIndex().hasNulls() ? idx + 1 : idx;
+
+    return column.getBitmapIndex().getConciseSet(index);
+  }
+
+  public ImmutableRTree getRTreeSpatialIndex(String dimension)
+  {
+    final Column column = index.getColumn(dimension.toLowerCase());
+    if (column == null || !column.getCapabilities().hasSpatialIndexes()) {
+      return new ImmutableRTree();
+    }
+
+    return column.getSpatialIndex().getRTree();
+  }
+
+  @Override
   public Offset getFilterOffset(Filter filter)
   {
     return new ConciseOffset(filter.goConcise(new MMappedBitmapIndexSelector(index)));
@@ -254,6 +286,8 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
 
       final Map<String, GenericColumn> genericColumnCache = Maps.newHashMap();
       final Map<String, ComplexColumn> complexColumnCache = Maps.newHashMap();
+      final Map<String, Object> objectColumnCache = Maps.newHashMap();
+
       final GenericColumn timestamps = index.getTimeColumn().getGenericColumn();
 
       final FunctionalIterator<Cursor> retVal = FunctionalIterator
@@ -344,8 +378,7 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
                             return column.lookupId(name);
                           }
                         };
-                      }
-                      else {
+                      } else {
                         return new DimensionSelector()
                         {
                           @Override
@@ -404,8 +437,8 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
                       if (cachedMetricVals == null) {
                         Column holder = index.getColumn(metricName);
                         if (holder != null && holder.getCapabilities().getType() == ValueType.FLOAT) {
-                            cachedMetricVals = holder.getGenericColumn();
-                            genericColumnCache.put(metricName, cachedMetricVals);
+                          cachedMetricVals = holder.getGenericColumn();
+                          genericColumnCache.put(metricName, cachedMetricVals);
                         }
                       }
 
@@ -465,6 +498,132 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
                         }
                       };
                     }
+
+                    @Override
+                    public ObjectColumnSelector makeObjectColumnSelector(String column)
+                    {
+                      final String columnName = column.toLowerCase();
+
+                      Object cachedColumnVals = objectColumnCache.get(columnName);
+
+                      if (cachedColumnVals == null) {
+                        Column holder = index.getColumn(columnName);
+
+                        if (holder != null) {
+                          final ColumnCapabilities capabilities = holder.getCapabilities();
+
+                          if (capabilities.hasMultipleValues()) {
+                            throw new UnsupportedOperationException(
+                                "makeObjectColumnSelector does not support multivalued columns"
+                            );
+                          }
+
+                          if (capabilities.isDictionaryEncoded()) {
+                            cachedColumnVals = holder.getDictionaryEncoding();
+                          } else if (capabilities.getType() == ValueType.COMPLEX) {
+                            cachedColumnVals = holder.getComplexColumn();
+                          } else {
+                            cachedColumnVals = holder.getGenericColumn();
+                          }
+                        }
+
+                        if (cachedColumnVals != null) {
+                          objectColumnCache.put(columnName, cachedColumnVals);
+                        }
+                      }
+
+                      if (cachedColumnVals == null) {
+                        return null;
+                      }
+
+                      if (cachedColumnVals instanceof GenericColumn) {
+                        final GenericColumn columnVals = (GenericColumn) cachedColumnVals;
+                        final ValueType type = columnVals.getType();
+
+                        if (type == ValueType.FLOAT) {
+                          return new ObjectColumnSelector<Float>()
+                          {
+                            @Override
+                            public Class classOfObject()
+                            {
+                              return Float.TYPE;
+                            }
+
+                            @Override
+                            public Float get()
+                            {
+                              return columnVals.getFloatSingleValueRow(cursorOffset.getOffset());
+                            }
+                          };
+                        }
+                        if (type == ValueType.LONG) {
+                          return new ObjectColumnSelector<Long>()
+                          {
+                            @Override
+                            public Class classOfObject()
+                            {
+                              return Long.TYPE;
+                            }
+
+                            @Override
+                            public Long get()
+                            {
+                              return columnVals.getLongSingleValueRow(cursorOffset.getOffset());
+                            }
+                          };
+                        }
+                        if (type == ValueType.STRING) {
+                          return new ObjectColumnSelector<String>()
+                          {
+                            @Override
+                            public Class classOfObject()
+                            {
+                              return String.class;
+                            }
+
+                            @Override
+                            public String get()
+                            {
+                              return columnVals.getStringSingleValueRow(cursorOffset.getOffset());
+                            }
+                          };
+                        }
+                      }
+
+                      if (cachedColumnVals instanceof DictionaryEncodedColumn) {
+                        final DictionaryEncodedColumn columnVals = (DictionaryEncodedColumn) cachedColumnVals;
+                        return new ObjectColumnSelector<String>()
+                        {
+                          @Override
+                          public Class classOfObject()
+                          {
+                            return String.class;
+                          }
+
+                          @Override
+                          public String get()
+                          {
+                            return columnVals.lookupName(columnVals.getSingleValueRow(cursorOffset.getOffset()));
+                          }
+                        };
+                      }
+
+                      final ComplexColumn columnVals = (ComplexColumn) cachedColumnVals;
+                      return new ObjectColumnSelector()
+                      {
+                        @Override
+                        public Class classOfObject()
+                        {
+                          return columnVals.getClazz();
+                        }
+
+                        @Override
+                        public Object get()
+                        {
+                          return columnVals.getRowValue(cursorOffset.getOffset());
+                        }
+                      };
+                    }
                   };
                 }
               }
@@ -485,6 +644,11 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
               }
               for (ComplexColumn complexColumn : complexColumnCache.values()) {
                 Closeables.closeQuietly(complexColumn);
+              }
+              for (Object column : complexColumnCache.values()) {
+                if (column instanceof Closeable) {
+                  Closeables.closeQuietly((Closeable) column);
+                }
               }
             }
           }
@@ -562,6 +726,8 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
     {
       final Map<String, GenericColumn> genericColumnCache = Maps.newHashMap();
       final Map<String, ComplexColumn> complexColumnCache = Maps.newHashMap();
+      final Map<String, Object> objectColumnCache = Maps.newHashMap();
+
       final GenericColumn timestamps = index.getTimeColumn().getGenericColumn();
 
       final FunctionalIterator<Cursor> retVal = FunctionalIterator
@@ -648,8 +814,7 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
                             return column.lookupId(name);
                           }
                         };
-                      }
-                      else {
+                      } else {
                         return new DimensionSelector()
                         {
                           @Override
@@ -708,8 +873,8 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
                       if (cachedMetricVals == null) {
                         Column holder = index.getColumn(metricName);
                         if (holder != null && holder.getCapabilities().getType() == ValueType.FLOAT) {
-                            cachedMetricVals = holder.getGenericColumn();
-                            genericColumnCache.put(metricName, cachedMetricVals);
+                          cachedMetricVals = holder.getGenericColumn();
+                          genericColumnCache.put(metricName, cachedMetricVals);
                         }
                       }
 
@@ -769,6 +934,131 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
                         }
                       };
                     }
+
+                    @Override
+                    public ObjectColumnSelector makeObjectColumnSelector(String column)
+                    {
+                      final String columnName = column.toLowerCase();
+
+                      Object cachedColumnVals = objectColumnCache.get(columnName);
+
+                      if (cachedColumnVals == null) {
+                        Column holder = index.getColumn(columnName);
+
+                        if (holder != null) {
+                          if (holder.getCapabilities().hasMultipleValues()) {
+                            throw new UnsupportedOperationException(
+                                "makeObjectColumnSelector does not support multivalued columns"
+                            );
+                          }
+                          final ValueType type = holder.getCapabilities().getType();
+
+                          if (holder.getCapabilities().isDictionaryEncoded()) {
+                            cachedColumnVals = holder.getDictionaryEncoding();
+                          } else if (type == ValueType.COMPLEX) {
+                            cachedColumnVals = holder.getComplexColumn();
+                          } else {
+                            cachedColumnVals = holder.getGenericColumn();
+                          }
+                        }
+
+                        if (cachedColumnVals != null) {
+                          objectColumnCache.put(columnName, cachedColumnVals);
+                        }
+                      }
+
+                      if (cachedColumnVals == null) {
+                        return null;
+                      }
+
+                      if (cachedColumnVals instanceof GenericColumn) {
+                        final GenericColumn columnVals = (GenericColumn) cachedColumnVals;
+                        final ValueType type = columnVals.getType();
+
+                        if (type == ValueType.FLOAT) {
+                          return new ObjectColumnSelector<Float>()
+                          {
+                            @Override
+                            public Class classOfObject()
+                            {
+                              return Float.TYPE;
+                            }
+
+                            @Override
+                            public Float get()
+                            {
+                              return columnVals.getFloatSingleValueRow(currRow);
+                            }
+                          };
+                        }
+                        if (type == ValueType.LONG) {
+                          return new ObjectColumnSelector<Long>()
+                          {
+                            @Override
+                            public Class classOfObject()
+                            {
+                              return Long.TYPE;
+                            }
+
+                            @Override
+                            public Long get()
+                            {
+                              return columnVals.getLongSingleValueRow(currRow);
+                            }
+                          };
+                        }
+                        if (type == ValueType.STRING) {
+                          return new ObjectColumnSelector<String>()
+                          {
+                            @Override
+                            public Class classOfObject()
+                            {
+                              return String.class;
+                            }
+
+                            @Override
+                            public String get()
+                            {
+                              return columnVals.getStringSingleValueRow(currRow);
+                            }
+                          };
+                        }
+                      }
+
+                      if (cachedColumnVals instanceof DictionaryEncodedColumn) {
+                        final DictionaryEncodedColumn columnVals = (DictionaryEncodedColumn) cachedColumnVals;
+                        return new ObjectColumnSelector<String>()
+                        {
+                          @Override
+                          public Class classOfObject()
+                          {
+                            return String.class;
+                          }
+
+                          @Override
+                          public String get()
+                          {
+                            return columnVals.lookupName(columnVals.getSingleValueRow(currRow));
+                          }
+                        };
+                      }
+
+                      final ComplexColumn columnVals = (ComplexColumn) cachedColumnVals;
+                      return new ObjectColumnSelector()
+                      {
+                        @Override
+                        public Class classOfObject()
+                        {
+                          return columnVals.getClazz();
+                        }
+
+                        @Override
+                        public Object get()
+                        {
+                          return columnVals.getRowValue(currRow);
+                        }
+                      };
+                    }
                   };
                 }
               }
@@ -787,6 +1077,11 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
               }
               for (ComplexColumn complexColumn : complexColumnCache.values()) {
                 Closeables.closeQuietly(complexColumn);
+              }
+              for (Object column : objectColumnCache.values()) {
+                if (column instanceof Closeable) {
+                  Closeables.closeQuietly((Closeable) column);
+                }
               }
             }
           }
@@ -862,6 +1157,18 @@ public class QueryableIndexStorageAdapter extends BaseStorageAdapter
     public ImmutableConciseSet getConciseInvertedIndex(String dimension, String value)
     {
       return getInvertedIndex(dimension, value);
+    }
+
+    @Override
+    public ImmutableConciseSet getConciseInvertedIndex(String dimension, int idx)
+    {
+      return getInvertedIndex(dimension, idx);
+    }
+
+    @Override
+    public ImmutableRTree getSpatialIndex(String dimension)
+    {
+      return getRTreeSpatialIndex(dimension);
     }
   }
 }

@@ -40,6 +40,7 @@ import com.metamx.druid.Query;
 import com.metamx.druid.client.DataSegment;
 import com.metamx.druid.client.DruidServer;
 import com.metamx.druid.client.ServerView;
+import com.metamx.druid.coordination.DataSegmentAnnouncer;
 import com.metamx.druid.guava.ThreadRenamingCallable;
 import com.metamx.druid.guava.ThreadRenamingRunnable;
 import com.metamx.druid.index.QueryableIndex;
@@ -54,10 +55,12 @@ import com.metamx.druid.query.QueryRunner;
 import com.metamx.druid.query.QueryRunnerFactory;
 import com.metamx.druid.query.QueryRunnerFactoryConglomerate;
 import com.metamx.druid.query.QueryToolChest;
+import com.metamx.druid.query.segment.SegmentDescriptor;
+import com.metamx.druid.query.segment.SpecificSegmentQueryRunner;
+import com.metamx.druid.query.segment.SpecificSegmentSpec;
 import com.metamx.druid.realtime.FireDepartmentMetrics;
 import com.metamx.druid.realtime.FireHydrant;
 import com.metamx.druid.realtime.Schema;
-import com.metamx.druid.realtime.SegmentAnnouncer;
 import com.metamx.druid.realtime.SegmentPublisher;
 import com.metamx.emitter.EmittingLogger;
 import com.metamx.emitter.service.ServiceEmitter;
@@ -70,6 +73,7 @@ import org.joda.time.Period;
 
 import javax.annotation.Nullable;
 import java.io.File;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -97,7 +101,7 @@ public class RealtimePlumberSchool implements PlumberSchool
   private volatile RejectionPolicyFactory rejectionPolicyFactory = null;
   private volatile QueryRunnerFactoryConglomerate conglomerate = null;
   private volatile DataSegmentPusher dataSegmentPusher = null;
-  private volatile SegmentAnnouncer segmentAnnouncer = null;
+  private volatile DataSegmentAnnouncer segmentAnnouncer = null;
   private volatile SegmentPublisher segmentPublisher = null;
   private volatile ServerView serverView = null;
 
@@ -144,7 +148,7 @@ public class RealtimePlumberSchool implements PlumberSchool
   }
 
   @JacksonInject("segmentAnnouncer")
-  public void setSegmentAnnouncer(SegmentAnnouncer segmentAnnouncer)
+  public void setSegmentAnnouncer(DataSegmentAnnouncer segmentAnnouncer)
   {
     this.segmentAnnouncer = segmentAnnouncer;
   }
@@ -230,10 +234,11 @@ public class RealtimePlumberSchool implements PlumberSchool
       public <T> QueryRunner<T> getQueryRunner(final Query<T> query)
       {
         final QueryRunnerFactory<T, Query<T>> factory = conglomerate.findFactory(query);
+        final QueryToolChest<T, Query<T>> toolchest = factory.getToolchest();
+
         final Function<Query<T>, ServiceMetricEvent.Builder> builderFn =
             new Function<Query<T>, ServiceMetricEvent.Builder>()
             {
-              private final QueryToolChest<T, Query<T>> toolchest = factory.getToolchest();
 
               @Override
               public ServiceMetricEvent.Builder apply(@Nullable Query<T> input)
@@ -242,37 +247,48 @@ public class RealtimePlumberSchool implements PlumberSchool
               }
             };
 
-        return factory.mergeRunners(
-            EXEC,
-            FunctionalIterable
-                .create(sinks.values())
-                .transform(
-                    new Function<Sink, QueryRunner<T>>()
-                    {
-                      @Override
-                      public QueryRunner<T> apply(@Nullable Sink input)
-                      {
-                        return new MetricsEmittingQueryRunner<T>(
-                            emitter,
-                            builderFn,
-                            factory.mergeRunners(
-                                EXEC,
-                                Iterables.transform(
-                                    input,
-                                    new Function<FireHydrant, QueryRunner<T>>()
-                                    {
-                                      @Override
-                                      public QueryRunner<T> apply(@Nullable FireHydrant input)
-                                      {
-                                        return factory.createRunner(input.getSegment());
-                                      }
-                                    }
+        return toolchest.mergeResults(
+            factory.mergeRunners(
+                EXEC,
+                FunctionalIterable
+                    .create(sinks.values())
+                    .transform(
+                        new Function<Sink, QueryRunner<T>>()
+                        {
+                          @Override
+                          public QueryRunner<T> apply(Sink input)
+                          {
+                            return new SpecificSegmentQueryRunner<T>(
+                                new MetricsEmittingQueryRunner<T>(
+                                    emitter,
+                                    builderFn,
+                                    factory.mergeRunners(
+                                        EXEC,
+                                        Iterables.transform(
+                                            input,
+                                            new Function<FireHydrant, QueryRunner<T>>()
+                                            {
+                                              @Override
+                                              public QueryRunner<T> apply(FireHydrant input)
+                                              {
+                                                return factory.createRunner(input.getSegment());
+                                              }
+                                            }
+                                        )
+                                    )
+                                ),
+                                new SpecificSegmentSpec(
+                                    new SegmentDescriptor(
+                                        input.getInterval(),
+                                        input.getSegment().getVersion(),
+                                        input.getSegment().getShardSpec().getPartitionNum()
+                                    )
                                 )
-                            )
-                        );
-                      }
-                    }
-                )
+                            );
+                          }
+                        }
+                    )
+            )
         );
       }
 
@@ -328,7 +344,9 @@ public class RealtimePlumberSchool implements PlumberSchool
             );
 
             synchronized (handoffCondition) {
-              handoffCondition.wait();
+              while (!sinks.isEmpty()) {
+                handoffCondition.wait();
+              }
             }
           }
           catch (InterruptedException e) {
@@ -372,7 +390,18 @@ public class RealtimePlumberSchool implements PlumberSchool
         for (File sinkDir : computeBaseDir(schema).listFiles()) {
           Interval sinkInterval = new Interval(sinkDir.getName().replace("_", "/"));
 
-          final File[] sinkFiles = sinkDir.listFiles();
+          //final File[] sinkFiles = sinkDir.listFiles();
+          // To avoid reading and listing of "merged" dir
+          final File[] sinkFiles = sinkDir.listFiles(
+              new FilenameFilter()
+              {
+                @Override
+                public boolean accept(File dir, String fileName)
+                {
+                  return !(Ints.tryParse(fileName) == null);
+                }
+              }
+          );
           Arrays.sort(
               sinkFiles,
               new Comparator<File>()
@@ -395,6 +424,14 @@ public class RealtimePlumberSchool implements PlumberSchool
             List<FireHydrant> hydrants = Lists.newArrayList();
             for (File segmentDir : sinkFiles) {
               log.info("Loading previously persisted segment at [%s]", segmentDir);
+
+              // Although this has been tackled at start of this method.
+              // Just a doubly-check added to skip "merged" dir. from being added to hydrants 
+              // If 100% sure that this is not needed, this check can be removed.
+              if (Ints.tryParse(segmentDir.getName()) == null) {
+                continue;
+              }
+
               hydrants.add(
                   new FireHydrant(
                       new QueryableIndexSegment(null, IndexIO.loadIndex(segmentDir)),
@@ -442,9 +479,12 @@ public class RealtimePlumberSchool implements PlumberSchool
                     final Long sinkKey = entry.getKey();
                     if (interval.contains(sinkKey)) {
                       final Sink sink = entry.getValue();
-                      log.info("Segment matches sink[%s]", sink);
+                      log.info("Segment[%s] matches sink[%s] on server[%s]", segment, sink, server);
 
-                      if (segment.getVersion().compareTo(sink.getSegment().getVersion()) >= 0) {
+                      final String segmentVersion = segment.getVersion();
+                      final String sinkVersion = sink.getSegment().getVersion();
+                      if (segmentVersion.compareTo(sinkVersion) >= 0) {
+                        log.info("Segment version[%s] >= sink version[%s]", segmentVersion, sinkVersion);
                         try {
                           segmentAnnouncer.unannounceSegment(sink.getSegment());
                           FileUtils.deleteDirectory(computePersistDir(schema, sink.getInterval()));
@@ -506,8 +546,9 @@ public class RealtimePlumberSchool implements PlumberSchool
 
                     log.info("Starting merge and push.");
 
-                    long minTimestamp = segmentGranularity.truncate(rejectionPolicy.getCurrMaxTime()).getMillis()
-                                        - windowMillis;
+                    long minTimestamp = segmentGranularity.truncate(
+                        rejectionPolicy.getCurrMaxTime().minus(windowMillis)
+                    ).getMillis();
 
                     List<Map.Entry<Long, Sink>> sinksToPush = Lists.newArrayList();
                     for (Map.Entry<Long, Sink> entry : sinks.entrySet()) {
@@ -571,7 +612,6 @@ public class RealtimePlumberSchool implements PlumberSchool
                                    .emit();
                               }
 
-
                               if (mergedFile != null) {
                                 try {
                                   if (mergedFile != null) {
@@ -622,6 +662,14 @@ public class RealtimePlumberSchool implements PlumberSchool
    */
   private int persistHydrant(FireHydrant indexToPersist, Schema schema, Interval interval)
   {
+    if (indexToPersist.hasSwapped()) {
+      log.info(
+          "DataSource[%s], Interval[%s], Hydrant[%s] already swapped. Ignoring request to persist.",
+          schema.getDataSource(), interval, indexToPersist
+      );
+      return 0;
+    }
+
     log.info("DataSource[%s], Interval[%s], persisting Hydrant[%s]", schema.getDataSource(), interval, indexToPersist);
     try {
       int numRows = indexToPersist.getIndex().size();
