@@ -50,7 +50,7 @@
 % without further effort on your part as the last section in
 % the body of your article BEFORE References or any Appendices.
 
-\numberofauthors{7} %  in this sample file, there are a *total*
+\numberofauthors{6} %  in this sample file, there are a *total*
 % of EIGHT authors. SIX appear on the 'first-page' (for formatting
 % reasons) and the remaining two appear in the \additionalauthors section.
 
@@ -102,8 +102,6 @@
 % author on the opening page (as the 'third row') but we ask,
 % for aesthetic reasons that you place these 'additional authors'
 % in the \additional authors block, viz.
-\additionalauthors{Michael Driscoll (Metamarkets, \texttt{mike@metamarkets.com})}
-\date{21 March 2013}
 % Just remember to make sure that the TOTAL number of authors
 % is the number that will appear on the first page PLUS the
 % number that will appear in the \additionalauthors section.
@@ -111,79 +109,92 @@
 \maketitle
 
 \begin{abstract}
-Druid is a scalable, real-time analytical data store that supports
-ad-hoc queries on large-scale data sets. The system combines a
-columnar data layout, a shared-nothing architecture, and an advanced
-indexing structure to allow arbitrary exploration of billion-row
-tables with sub-second latencies. Druid scales horizontally and is the
-core engine of the Metamarkets platform. In this paper, we detail the
-architecture and implementation of Druid and describe how it solves
-the real-time data ingestion problem.
+Druid is a scalable, real-time analytical data store that supports ad-hoc queries on large-scale data sets. The system combines a
+columnar data layout, a shared-nothing architecture, and an advanced indexing structure to allow arbitrary exploration of billion-row
+tables with sub-second latencies. Druid scales horizontally and is the core engine of the Metamarkets platform. In this paper, we detail the architecture and implementation of Druid and describe how it solves the real-time data ingestion problem.
 \end{abstract}
 
 \section{Introduction}
-In recent years, enterprises are facing ever-growing collections of
-data in all forms. The scale of data has reached terabytes, even
-petabytes of information per day. Companies are increasingly realizing
-the importance of unlocking the insights contained within this
-data. Numerous database vendors such as IBM’s Netezza \cite{singh2011introduction}, Vertica
-\cite{bear2012vertica}, and EMC’s Greenplum \cite{miner2012unified} offer data warehousing solutions, and
-several research papers \cite{barroso2009datacenter,
-chaudhuri1997overview, dewitt1992parallel} directly address this problem as
-well. As the interactive data exploration space becomes more mature,
-it is apparent that real-time ingestion and exploration of data will
-unlock business-critical decisions for front office and back office
-analysts.
+In recent years, the proliferation of internet technology and usage has created a surge in the amount of machine-generated data.  Individually, each of these pieces of information is rather low-value and information sparse.  Meaning that a lot of companies were willing to let this data just disappear rather than spend the time and resources on extracting information from it.  Infrastructure to handle this type of data was built (IBM's Netezza\cite{singh2011introduction}, Vertica\cite{bear2012vertica}, and EMC's Greenplum\cite{miner2012unified}) and written about\cite{barroso2009datacenter, chaudhuri1997overview, dewitt1992parallel}, but they largely sold at high price points that targetted only those companies who could afford the software.
 
-Metamarkets realized early on that for high data volumes, existing
-Relational Database Management Systems (RDBMS) and most NoSQL
-architectures were not sufficient to address the performance and
-use-case needs of the business intelligence space. Druid was built to
-address a gap we believe exists in the current big-data ecosystem for
-a real-time analytical data store. Druid is a distributed, columnar,
-shared-nothing data store designed to reliably scale to petabytes of
-data and thousands of cores. It is a highly available system designed
-to run on commodity hardware with no downtime in the face of failures,
-data imports or software updates. We have been building Druid over the
-course of the last two years and it is the core engine of the
-Metamarkets technology stack.
+Google initially introduced MapReduce as their mechanism of leveraging commodity hardware\cite{cite-required} to index the internet and analyse logs.  The Hadoop project is largely patterned after the insights that came out of that original MapReduce paper from Google and is currently deployed in many different organizations for the long-term storage and analysis of large amounts of log data.  This has done a lot to help companies convert their low-value event streams into high-value aggregates to leverage in recommender systems, business intelligence and A-B testing infrastructure.
 
-In many ways, Druid shares similarities with other interactive query systems
-\cite{melnik2010dremel}, main-memory databases \cite{farber2012sap}, and widely-known distributed data
-stores such as BigTable \cite{chang2008bigtable}, Dynamo \cite{decandia2007dynamo}, and Cassandra \cite{lakshman2010cassandra}. Unlike
-most traditional data stores, Druid operates mainly on read-only data
-and has limited functionality for writes. The system is highly optimized
-for large-scale transactional data aggregation and arbitrarily deep data exploration. Druid is highly configurable
-and allows users to adjust levels of fault tolerance and
-performance.
+However, as with a lot of great systems, the introduction of the Hadoop has opened our eyes to a new space of problems.  Specifically, Hadoop excels at storing and providing access to large amounts of data, it does not, however, make any performance guarantees around how quickly you can access that data.  It is also a highly available system, but it could be better at handling significant concurrent load.  Lastly, while Hadoop is good at storing data once it is in the system, it is not optimized for getting data into the system and making it immediately readable.
 
-Druid builds on the ideas of other distributed data stores, real-time
-computation engines, and search engine indexing algorithms. In this
-paper, we make the following contributions to academia:
-\begin{itemize}
-\item We outline Druid’s real-time ingestion and query capabilities
-and explain how we can explore events within milliseconds of their
-creation
-\item We describe how the architecture allows for fast and flexible
-queries and how inverted indices can be applied to quickly filter
-data
-\item We present experiments benchmarking Druid’s performance
-\end{itemize}
-The format of the paper is as follows: Section \ref{sec:data-model} describes the Druid
-data model. Section \ref{sec:cluster} presents an overview of the components of a
-Druid cluster. Section \ref{sec:query-api} outlines the query API. Section \ref{sec:storage} describes
-data storage format in greater detail. Section \ref{sec:robustness} discusses Druid
-robustness and failure responsiveness. Section \ref{sec:benchmarks} provides our
-performance benchmarks. Section \ref{sec:related} lists the related work and Section \ref{sec:conclusions} presents
-our conclusions.
+Early on in the development of the Metamarkets product, we ran into each of these issues and came to the realization that Hadoop is a great back-office, batch processing and data warehousing system.  But, as a company that needs to have product-level guarantees around query performance and data availability in a highly concurrent environment (1000+ users), it wasn't going to meet our needs.  We then explored the space of solutions to our specific problem, and, after trying both Relational Database Management Systems and NoSQL architectures, we came to the conclusion that there was nothing yet in the open source space which could be adjusted to solve our problem.
+
+We ended up creating Druid, an open-source, distributed, column-oriented, realtime analytical data store.  In many ways, Druid shares similarities with other interactive query systems \cite{melnik2010dremel}, main-memory databases \cite{farber2012sap}, and widely-known distributed data stores such as BigTable \cite{chang2008bigtable}, Dynamo \cite{decandia2007dynamo}, and Cassandra \cite{lakshman2010cassandra}.  It's distribution model and query model also borrow ideas from current generation search infrastructure \cite{paper-on-solr/lucene?, paper-on-sensei-db?, paper-on-elastic-search?}
+
+This paper describes the architecture of Druid, explores the various design decisions made in creating an always-on production system that powers a hosted service, and attempts to help inform anyone who faces a similar problem about a potential method of solving it.
+
+The paper starts out describing the problem in Section \ref{sec:problem-definition}.  It then continues on to describe the architecture of the system from the point of view of how data flows through the system in Section \ref{sec:architecture}.  We discuss how and why data gets converted into a binary format in Section \ref{sec:data-model}.  Lastly, we leave off with some benchmarks in Section \ref{sec:benchmarks}, Related Work in Section \ref{sec:related} and Conclusions in Section \ref{sec:conclusions}.
+
+\section{Problem Definition}
+\label{sec:problem-definition}
+
+I think we should break this up into three subsections:
+
+\subsection{The Users}
+
+Let's describe the users of our system, what problem they have: i.e. data transparency issues.  They have a large amount of data and they want to be able to see what is actually going on inside of it.  Let's get some ad tech examples and throw them in if we can.
+
+\subsection{The Data}
+
+Let's describe what the data looks like.  This should probably tie back into the issues that the Users want to resolve described in the above subsection
+
+\subsection{The Product}
+
+Let's describe the overall idea of the ``faceted search dashboard'' on top of event streams.  Essentially, we decided that exposing a dashboard that incorporates the faceted-search metaphor for exploring time-series would resolve the issues that the Users have.
+
+\section{Architecture}
+\label{sec:architecture}
+
+Let's make this a flow of how data flows through the system.  So, take the stuff from sec:cluster and organize it as the subsections listed below.  We should be able to include the robustness concerns of each piece in its own section and perhaps not need the robustness section anymore?
+
+\subsection{Message Bus}
+
+\subsection{Realtime Node}
+
+\subsection{Deep Storage}
+
+\subsection{Coordinator}
+
+\subsection{Historical Node}
+
+\subsection{ZooKeeper}
+
+\subsection{Broker Node}
 
 \section{Data Model}
 \label{sec:data-model}
-The fundamental storage unit in Druid is the segment. Distribution and
-replication in Druid are always done at a segment level. Segments
-encapsulate a partition of a larger transactional data set. To better
-understand how a typical row/column collection of data translates into
-a Druid segment, consider the data set shown in Table~\ref{tab:sample_data}.
+
+Let's break this up into
+
+\subsection{Block}
+
+Discuss what a block of data is and that we index it.
+
+\subsection{Segment}
+
+A chunk of a block, self-contained, etc.
+
+\subsection{Binary format}
+
+sec:storage can probably make sense here
+
+\subsection{Bitmap Indexes}
+
+How we build them, why we use them and CONCISE
+
+
+
+====================================== end Eric edits
+
+
+
+\section{Data Model}
+\label{sec:data-model}
+The fundamental storage unit in Druid is the segment. Distribution and replication in Druid are always done at a segment level. Segments encapsulate a partition of a larger transactional data set. To better understand how a typical row/column collection of data translates into a Druid segment, consider the data set shown in Table~\ref{tab:sample_data}.
 
 \begin{table*}
 \centering
@@ -201,68 +212,23 @@ a Druid segment, consider the data set shown in Table~\ref{tab:sample_data}.
 }
 \end{table*}
 
-A segment is composed of multiple binary files, each representing a
-column of a data set. The data set in Table~\ref{tab:sample_data} consists of 8 distinct
-columns, one of which is the timestamp column. Druid always requires a
-timestamp column because it (currently) only operates with event-based
-data. Segments always represent some time interval and each column
-file contains the specific values for that column over the time
-interval. Since segments always contain data for a time range, it is
-logical that Druid partitions data into smaller chunks based on the
-timestamp value. In other words, segments can be thought of as blocks
-of data that represent a certain granularity of time. For example, if
-we wanted to shard the data in Table~\ref{tab:sample_data} to an hourly granularity, the
-partitioning algorithm would result in two segments, one representing
-each hour of 2011-01-01. Similarly, if we sharded the data to a daily
-granularity, we would create a single segment for 2011-01-01.
+A segment is composed of multiple binary files, each representing a column of a data set. The data set in Table~\ref{tab:sample_data} consists of 8 distinct columns, one of which is the timestamp column. Druid can only operate on data with a timestamp. Segments always represent some time interval and each column file contains the specific values for that column over the time interval. Since segments always contain data for a time range, it is logical that Druid partitions data into smaller chunks based on the timestamp value. In other words, segments can be thought of as blocks of data that represent a certain granularity of time. For example, if we wanted to shard the data in Table~\ref{tab:sample_data} to an hourly granularity, the partitioning algorithm would result in two segments, one representing each hour of 2011-01-01. Similarly, if we sharded the data to a daily granularity, we would create a single segment for 2011-01-01.
 
-Partitioning the data based on granularity buckets allows users to
-fine tune the degree of parallelization they want in Druid. A data set
-representing a year’s worth of data may be bucketed by day, and a data
-set representing only a day’s worth of day may be partitioned by
-hour. Sharding on a single dimension (time) may still result in segments that are too large to manage if the data volume is sufficiently high.
-To create more operable partition chunks, Druid may
-additionally shard data based on other factors such as dimension
-cardinality. Each shard creates a segment and hence, segments are uniquely identified by a data source
-id describing the data, the time interval of the data, a version
-indicating when the segment was created, and a shard partition number.
+Partitioning the data based on granularity buckets allows users to fine tune the degree of parallelization they want in Druid. A data set representing a year’s worth of data may be bucketed by day, and a data set representing only a day’s worth of day may be partitioned by hour. Sharding on time alone may still result in segments that are too large to manage if the data volume is sufficiently high. To create more operable partition chunks, Druid has the ability to additionally shard data based on other dimensions. Each shard creates a segment and hence, segments are uniquely identified by a data source id describing the data, the time interval of the data, a version indicating when the segment was created, and a shard partition number.
 
-Data in Druid can be conceptually thought of as being either real-time
-or historical. Real-time data refers to recently ingested data;
-typically, in a production setting, this will be data for the current
-hour. Historical data refers to any data that is older. Segments can
-be similarly classified as being either real-time or historical.
+Data in Druid can be conceptually thought of as being either real-time or historical. Real-time data refers to recently ingested data;
+typically, in a production setting, this will be data for the current hour. Historical data refers to any data that is older. Segments can be similarly classified as being either real-time or historical.
 
-Historical segments are immutable and do not support insert, delete,
-or update semantics. By maintaining immutable blocks of data within
-the system, we can maintain a consistent snapshot of historical
-data and provide read consistency without having to worry about
-concurrent updates and deletes. If updates to a historical segment are
-required, we build a new segment for the same data source and time
-interval with the updated data. This new segment will have an updated version identifier.
+Historical segments are immutable and do not support insert, delete, or update semantics. By maintaining immutable blocks of data within the system, we can maintain a consistent snapshot of historical data and provide read consistency without having to worry about
+concurrent updates and deletes. If updates to a historical segment are required, we build a new segment for the same data source and time interval with the updated data. This new segment will have an updated version identifier.
 
-Multiple segments for the same data source and time range
-may exist in the system at any time. To provide read consistency,
-Druid read operations always access data in a particular time range
-from the segment with the latest version identifier for that time
-range. Historical segments may be stored on local disk or in a
-key-value “deep” store such as S3 \cite{decandia2007dynamo} or HDFS \cite{shvachko2010hadoop}. All historical
-segments have associated metadata describing properties of the segment
-such as size in bytes, compression format, and location in deep
-storage.
+Multiple segments for the same data source and time range may exist in the system at any time. To provide read consistency, Druid read operations always access data in a particular time range from the segment with the latest version identifier for that time range. Historical segments may be stored on local disk or in a key-value “deep” store such as S3 \cite{decandia2007dynamo} or HDFS \cite{shvachko2010hadoop}. All historical segments have associated metadata describing properties of the segment such as size in bytes, compression format, and location in deep storage.
 
-Real-time segments are mutable and generally represent a much shorter
-duration of time than historical segments. Real-time segments contain
-recent data and are incrementally populated as new events are
-ingested. On a periodic basis, real-time segments are converted into
-historical segments. Additional details about this conversion process
-are given in Section~\ref{sec:realtime}.
+Real-time segments are mutable and generally represent a much shorter duration of time than historical segments. Real-time segments contain recent data and are incrementally populated as new events are ingested. On a periodic basis, real-time segments are converted into historical segments. Additional details about this conversion process are given in Section~\ref{sec:realtime}.
 
 \section{Cluster}
 \label{sec:cluster}
-A Druid cluster consists of different types of nodes, each performing
-a specific function. The composition of a Druid cluster is shown in
-Figure~\ref{fig:druid_cluster}.
+A Druid cluster consists of different types of nodes, each performing a specific function. The composition of a Druid cluster is shown in Figure~\ref{fig:druid_cluster}.
 
 \begin{figure*}
 \centering
@@ -271,95 +237,38 @@ Figure~\ref{fig:druid_cluster}.
 \label{fig:druid_cluster}
 \end{figure*}
 
-Recall that data in Druid is classified as either real-time or
-historical. The Druid cluster is architected to reflect this
-conceptual separation of data. Real-time nodes are responsible for
-ingesting, storing, and responding to queries for the most recent
-events. Similarly, historical compute nodes are responsible for
-loading and responding to queries for historical events.
+Recall that data in Druid is classified as either real-time or historical. The Druid cluster is architected to reflect this conceptual separation of data. Real-time nodes are responsible for ingesting, storing, and responding to queries for the most recent events. Similarly, historical compute nodes are responsible for loading and responding to queries for historical events.
 
-Data in Druid is stored on storage nodes. Storage nodes can be either
-compute or real-time nodes.  Queries to access this data will
-typically first hit a layer of broker nodes. Broker nodes are
-responsible for finding and routing queries down to the storage nodes
-that host the pertinent data. The storage nodes compute their portion
-of the query response in parallel and return their results to the
-brokers. Broker nodes, compute nodes, and realtime nodes can all be
-classified as queryable nodes.
+Data in Druid is stored on storage nodes. Storage nodes can be either compute or real-time nodes.  Queries to access this data will typically first hit a layer of broker nodes. Broker nodes are responsible for finding and routing queries down to the storage nodes that host the pertinent data. The storage nodes compute their portion of the query response in parallel and return their results to the brokers. Broker nodes, compute nodes, and realtime nodes can all be classified as queryable nodes.
 
-Druid also has a set of coordination nodes to manage load assignment,
-distribution, and replication. Coordination nodes are not queryable
-and instead focus on maintaining cluster stability. Coordination nodes
-have an external dependency on a MySQL database.
+Druid also has a set of coordination nodes to manage load assignment, distribution, and replication. Coordination nodes are not queryable and instead focus on maintaining cluster stability. Coordination nodes have an external dependency on a MySQL database.
 
-Druid relies on an Apache Zookeeper \cite{hunt2010zookeeper} cluster
-for coordination. This dependency is required because there is no
-direct coordination-related communication between Druid nodes. The
-following sections will discuss each Druid component in greater
-detail.
+Druid relies on an Apache Zookeeper \cite{hunt2010zookeeper} cluster for coordination. This dependency is required because there is no direct coordination-related communication between Druid nodes. The following sections will discuss each Druid component in greater detail.
 
 \subsection{Apache Zookeeper}
-Zookeeper is a service for coordinating processes of distributed
-applications. Zookeeper provides connecting applications an
-abstraction of a hierarchy of data nodes known as znodes. Each znode
-is part of a hierarchical namespace, similar to file
-systems. Zookeeper has the concept of ephemeral and permanent
-znodes. Permanent nodes must be created and destroyed explicitly by a
-connecting application. Ephemeral znodes can be created by connecting
-applications and deleted either explicitly or if the session that
-created the znode is terminated (such as in the event of service
-failure).
+Zookeeper is a service for coordinating processes of distributed applications. Zookeeper provides connecting applications an abstraction of a hierarchy of data nodes known as znodes. Each znode is part of a hierarchical namespace, similar to file systems. Zookeeper has the concept of ephemeral and permanent znodes. Permanent znodes persist forever after creation until explicitly deleted. Ephemeral znodes, on the otherhand, have their lifecycle tied to a specific Zookeeper session; they can be created and removed similarly to permanent znodes, but also if the session that created the ephemeral node expires, the node will be immediately removed.
 
 \subsection{Historical Compute Nodes}
-Historical compute nodes are the main workers of a Druid cluster and
-are self-contained and self-sufficient. Compute nodes load historical
-segments from permanent/deep storage and expose them for
-querying. There is no single point of contention between the nodes and
-nodes have no knowledge of one another. Compute nodes are
-operationally simple; they only know how to perform the tasks they are
-assigned. To help other services discover compute nodes and the data
-they hold, every compute node maintains a constant Zookeeper
-connection. Compute nodes announce their online state and the segments
-they serve by creating ephemeral nodes under specifically configured
-Zookeeper paths. Instructions for a given compute node to load new
-segments or drop existing segments are sent by creating ephemeral
-znodes under a special “load queue” path associated with the compute
-node.
+Historical compute nodes are the main workers of a Druid cluster.  Compute nodes load historical segments from permanent/deep storage and expose them for querying. Compute nodes do not communicate with each other and thus there is no single point of contention between them.  They are a completely reactive tier that only knows how to do a few things:
 
-To expose a segment for querying, a compute node must first possess a
-local copy of the segment. Before a compute node downloads a segment
-from deep storage, it first checks a local disk directory (cache) to
-see if the segment already exists in local storage. If no cache
-information about the segment is present, the compute node will
-download metadata about the segment from Zookeeper. This metadata
-includes information about where the segment is located in deep
-storage and about how to decompress and process the segment. Once a
-compute node completes processing a segment, the node announces (in
-Zookeeper) that it is serving the segment. At this point, the segment
-is queryable.
+\begin{itemize}
+\item Load and Drop segments
+\item Run queries on loaded segments
+\end{itemize}
+
+If a compute node is never told to do anything, it will do nothing.
+
+To help other services discover compute nodes and the data they hold, every compute node maintains a constant Zookeeper connection. Compute nodes announce their online state and the segments they serve by creating ephemeral nodes in Zookeeper. Instructions for a given compute node to load new segments or drop existing segments are also done via a Zookeeper-based protocol.
+
+To expose a segment for querying, a compute node first downloads the segment from deep storage so that it has a local copy of the data.  As an optimization, it first checks a local disk directory (cache) to see if the segment already exists in local storage. Once a compute node downloads and stores the segment on its local disk, it memory maps it and announces (via a Zookeeper ephemeral node) that it is serving the segment. At this point, the segment is queryable.
 
 \subsubsection{Tiers}
 \label{sec:tiers}
-Compute nodes can be grouped in different tiers, where all nodes in a
-given tier are identically configured. Different performance and
-fault-tolerance parameters can be set for each tier. The purpose of
-tiered nodes is to enable higher or lower priority segments to be
-distributed according to their importance. For example, it is possible
-to spin up a “hot” tier of compute nodes that have a high number of
-cores and a large RAM capacity. The “hot” cluster can be configured to
-download more frequently accessed segments. A parallel “cold” cluster
-can also be created with much less powerful backing hardware. The
-“cold” cluster would only contain less frequently accessed segments.
+Compute nodes can be grouped in different tiers, where all nodes in a given tier are identically configured. Different performance and fault-tolerance parameters can be set for each tier. The purpose of tiered nodes is to enable higher or lower priority segments to be distributed according to their importance. For example, it is possible to spin up a ``hot'' tier of compute nodes that have a high number of cores and a large RAM capacity. The ``hot'' cluster can be configured to download more frequently accessed segments. A parallel ``cold'' cluster can also be created with much less powerful backing hardware. The ``cold'' cluster would only contain less frequently accessed segments.
 
 \subsection{Real-time Nodes}
 \label{sec:realtime}
-Real-time nodes encapsulate the functionality to ingest and query
-real-time data streams. Data indexed via these nodes is immediately
-available for querying. Real-time nodes are a consumer of data and
-require a corresponding producer to provide the data
-stream. Typically, for data durability purposes, a message bus such as
-Kafka \cite{kreps2011kafka} sits between the producer and the real-time node as shown
-in Figure~\ref{fig:data-ingestion}.
+Real-time nodes provide the functionality to ingest and query real-time data streams. Data indexed via these nodes is immediately available for querying. Real-time nodes are a consumer of data stream and require a corresponding producer to provide the data stream. Typically, for data durability purposes, a message bus such as Kafka \cite{kreps2011kafka} sits between the producer and the real-time node as shown in Figure~\ref{fig:data-ingestion}.
 
 \begin{figure}
 \centering
@@ -368,33 +277,11 @@ in Figure~\ref{fig:data-ingestion}.
 \label{fig:data-ingestion}
 \end{figure}
 
-The purpose of the message bus in Figure~\ref{fig:data-ingestion} is to act as a buffer for
-incoming events. The message bus can maintain offsets indicating the
-position in an event stream that a real-time node has read up to and
-real-time nodes can update these offsets periodically. The message bus also acts as a backup storage for recent events.
-Real-time nodes ingest data by reading events from the message bus. The time from event creation to message bus storage to
-event consumption is on the order of hundreds of milliseconds.
+The purpose of the message bus in Figure~\ref{fig:data-ingestion} is to act as a buffer for incoming events. The message bus can maintain offsets indicating the position in an event stream that a real-time node has read up to and real-time nodes can update these offsets periodically. The message bus also acts as backup storage for recent events. Real-time nodes ingest data by reading events from the message bus. The time from event creation to message bus storage to event consumption is on the order of hundreds of milliseconds.
 
-Real-time nodes maintain an in-memory index for all incoming
-events. These indexes are incrementally populated as new events appear on the message bus. The indexes are also directly queryable.
-Real-time nodes persist their indexes to disk either periodically or after some maximum row limit is
-reached. After each persist, a real-time node updates the message bus
-with the offset of the last event of the most recently persisted
-index. Each persisted index is immutable. If a real-time node fails and recovers, it can simply reload
-any indexes that were persisted to disk and continue reading the
-message bus from the point the last offset was committed. Periodically committing offsets reduces the number of messages a real-time
-node has to rescan after a failure scenario.
+Real-time nodes maintain an in-memory index for all incoming events. These indexes are incrementally populated as new events appear on the message bus. The indexes are also directly queryable. Real-time nodes persist their indexes to disk either periodically or after some maximum row limit is reached. After each persist, a real-time node updates the message bus with the offset of the last event of the most recently persisted index. Each persisted index is immutable. If a real-time node fails and recovers, it can simply reload any indexes that were persisted to disk and continue reading the message bus from the point the last offset was committed. Periodically committing offsets reduces the number of messages a real-time node has to rescan after a failure scenario.
 
-Real-time nodes maintain a consolidated view of the currently updating
-index and of all indexes persisted to disk. This unified view allows
-all indexes on a node to be queried. On a periodic basis, the nodes will
-schedule a background task that searches for all persisted indexes of
-a data source. The task merges these indexes together and builds a
-historical segment. The nodes will upload the segment to deep storage
-and provide a signal for the historical compute nodes to begin serving
-the segment. The ingest, persist, merge, and handoff steps are fluid;
-there is no data loss as a real-time node converts a real-time segment
-to a historical one. Figure~\ref{fig:data-durability} illustrates the process.
+Real-time nodes maintain a consolidated view of the currently updating index and of all indexes persisted to disk. This unified view allows all indexes on a node to be queried. On a periodic basis, the nodes will schedule a background task that searches for all persisted indexes of a data source. The task merges these indexes together and builds a historical segment. The nodes will upload the segment to deep storage and provide a signal for the historical compute nodes to begin serving the segment. The ingest, persist, merge, and handoff steps are fluid; there is no data loss as a real-time node converts a real-time segment to a historical one. Figure~\ref{fig:data-durability} illustrates the process.
 
 \begin{figure}
 \centering
@@ -403,41 +290,12 @@ to a historical one. Figure~\ref{fig:data-durability} illustrates the process.
 \label{fig:data-durability}
 \end{figure}
 
-Similar to compute nodes, real-time nodes announce segments in
-Zookeeper. Unlike historical segments, real-time segments may
-represent a period of time that extends into the future. For example,
-a real-time node may announce it is serving a segment that contains
-data for the current hour. Before the end of the hour, the real-time
-node continues to collect data for the hour. Every 10 minutes (the
-persist period is configurable), the node will flush and persist its
-in-memory index to disk. At the end of the current hour, the real-time
-node prepares to serve data for the next hour by creating a new index
-and announcing a new segment for the next hour. The node does not
-immediately merge and build a historical segment for the previous hour
-until after some window period has passed. Having a window period
-allows for straggling data points to come in and minimizes the risk of
-data loss. At the end of the window period, the real-time node will
-merge all persisted indexes, build a historical segment for the
-previous hour, and hand the segment off to historical nodes to
-serve. Once the segment is queryable on the historical nodes, the
-real-time node flushes all information about the segment and
-unannounces it is serving the segment.
+Similar to compute nodes, real-time nodes announce segments in Zookeeper. Unlike historical segments, real-time segments may represent a period of time that extends into the future. For example, a real-time node may announce it is serving a segment that contains data for the current hour. Before the end of the hour, the real-time node continues to collect data for the hour. Every 10 minutes (the persist period is configurable), the node will flush and persist its in-memory index to disk. At the end of the current hour, the real-time node prepares to serve data for the next hour by creating a new index and announcing a new segment for the next hour. The node does not immediately merge and build a historical segment for the previous hour until after some window period has passed. Having a window period allows for straggling data points to come in and minimizes the risk of data loss. At the end of the window period, the real-time node will merge all persisted indexes, build a historical segment for the previous hour, and hand the segment off to historical nodes to serve. Once the segment is queryable on the historical nodes, the real-time node flushes all information about the segment and unannounces it is serving the segment.
 
-Real-time nodes are highly scalable. If the data volume and ingestion
-rates for a given data source exceed the maximum capabilities of a
-single node, additional nodes can be added.  Multiple nodes can
-consume events from the same stream, and every individual node only
-holds a portion of the total number of events.  This creates natural
-partitions across nodes. Each node announces the real-time segment it
-is serving and each real-time segment has a partition number.  Data
-from individual nodes will be merged at the Broker level.  To our
-knowledge, the largest production level real-time Druid cluster is
-consuming approximately 2 TB of raw data per hour.
+Real-time nodes are highly scalable. If the data volume and ingestion rates for a given data source exceed the maximum capabilities of a single node, additional nodes can be added.  Multiple nodes can consume events from the same stream, and every individual node only holds a portion of the total number of events.  This creates natural partitions across nodes. Each node announces the real-time segment it is serving and each real-time segment has a partition number.  Data from individual nodes will be merged at the Broker level.  To our knowledge, the largest production level real-time Druid cluster is consuming approximately 2 TB of raw data per hour.
 
 \subsection{Broker Nodes}
-Broker nodes act as query routers to other queryable nodes such as
-compute and real-time nodes. Broker nodes understand the metadata
-published in Zookeeper about what segments exist and on what nodes the
+Broker nodes act as query routers to other queryable nodes such as compute and real-time nodes. Broker nodes understand the metadata published in Zookeeper about what segments exist and on what nodes the
 segments are stored. Broker nodes route incoming queries such that the queries hit
 the right storage nodes. Broker nodes also merge partial results from
 storage nodes before returning a final consolidated result to the
