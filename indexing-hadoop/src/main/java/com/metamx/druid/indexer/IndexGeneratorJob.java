@@ -125,7 +125,10 @@ public class IndexGeneratorJob implements Jobby
       SortableBytes.useSortableBytesAsMapOutputKey(job);
 
       job.setNumReduceTasks(Iterables.size(config.getAllBuckets()));
-      job.setPartitionerClass(IndexGeneratorPartitioner.class);
+
+      if (!job.getConfiguration().get("mapred.job.tracker").equals("local")) {
+        job.setPartitionerClass(IndexGeneratorPartitioner.class);
+      }
 
       job.setReducerClass(IndexGeneratorReducer.class);
       job.setOutputKeyClass(BytesWritable.class);

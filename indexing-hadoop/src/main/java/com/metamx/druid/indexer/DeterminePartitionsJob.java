@@ -192,8 +192,11 @@ public class DeterminePartitionsJob implements Jobby
       dimSelectionJob.setOutputValueClass(Text.class);
       dimSelectionJob.setOutputFormatClass(DeterminePartitionsDimSelectionOutputFormat.class);
       dimSelectionJob.setJarByClass(DeterminePartitionsJob.class);
-      dimSelectionJob.setPartitionerClass(DeterminePartitionsDimSelectionPartitioner.class);
       dimSelectionJob.setNumReduceTasks(config.getGranularitySpec().bucketIntervals().size());
+
+      if (!dimSelectionJob.getConfiguration().get("mapred.job.tracker").equals("local")) {
+        dimSelectionJob.setPartitionerClass(DeterminePartitionsDimSelectionPartitioner.class);
+      }
 
       config.intoConfiguration(dimSelectionJob);
       FileOutputFormat.setOutputPath(dimSelectionJob, config.makeIntermediatePath());
