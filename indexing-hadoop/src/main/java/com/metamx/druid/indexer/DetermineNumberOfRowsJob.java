@@ -144,7 +144,7 @@ public class DetermineNumberOfRowsJob implements Jobby
       groupByJob.setMapperClass(DeterminePartitionsGroupByMapper.class);
       groupByJob.setMapOutputKeyClass(BytesWritable.class);
       groupByJob.setMapOutputValueClass(BytesWritable.class);
-      groupByJob.setCombinerClass(DeterminePartitionsGroupByCombiner.class);
+//      groupByJob.setCombinerClass(DeterminePartitionsGroupByCombiner.class);
       groupByJob.setReducerClass(DeterminePartitionsGroupByReducer.class);
       groupByJob.setOutputKeyClass(BytesWritable.class);
       groupByJob.setOutputValueClass(LongWritable.class);
@@ -218,6 +218,7 @@ public class DetermineNumberOfRowsJob implements Jobby
   {
     private QueryGranularity rollupGranularity = null;
     private static HashFunction hashFunction = null;
+    private HyperLogLog hyperLogLog;
 
     @Override
     protected void setup(Context context)
@@ -226,6 +227,7 @@ public class DetermineNumberOfRowsJob implements Jobby
       super.setup(context);
       rollupGranularity = getConfig().getRollupSpec().getRollupGranularity();
       hashFunction = Hashing.murmur3_128();
+      hyperLogLog = new HyperLogLog(20);
     }
 
     @Override
@@ -247,11 +249,27 @@ public class DetermineNumberOfRowsJob implements Jobby
           rollupGranularity.truncate(inputRow.getTimestampFromEpoch()),
           dims
       );
+
+      hyperLogLog.offerHashed(hashFunction.hashBytes(HadoopDruidIndexerConfig.jsonMapper.writeValueAsBytes(groupKey)).asLong());
+    }
+
+    @Override
+    public void run(Context context) throws IOException, InterruptedException {
+      setup(context);
+
+      while (context.nextKeyValue()) {
+        map(context.getCurrentKey(), context.getCurrentValue(), context);
+      }
+
       context.write(
           new BytesWritable("key".getBytes()), //change this to truncated timestamp
-          new BytesWritable(Longs.toByteArray(hashFunction.hashBytes(HadoopDruidIndexerConfig.jsonMapper.writeValueAsBytes(groupKey)).asLong())) //change writeValueAsBytes to proper types
+          new BytesWritable(hyperLogLog.getBytes())
       );
+
+      cleanup(context);
     }
+
+
   }
 
   public static class DeterminePartitionsGroupByCombiner
