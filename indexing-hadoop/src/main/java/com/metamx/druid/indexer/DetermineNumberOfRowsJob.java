@@ -47,6 +47,7 @@ import com.metamx.druid.CombiningIterable;
 import com.metamx.druid.QueryGranularity;
 import com.metamx.druid.input.InputRow;
 import com.metamx.druid.shard.NoneShardSpec;
+import com.metamx.druid.shard.NumberedShardSpec;
 import com.metamx.druid.shard.ShardSpec;
 import com.metamx.druid.shard.SingleDimensionShardSpec;
 import org.apache.hadoop.conf.Configuration;
@@ -74,7 +75,9 @@ import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeComparator;
 import org.joda.time.Interval;
+import org.joda.time.format.ISODateTimeFormat;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
@@ -131,95 +134,40 @@ public class DetermineNumberOfRowsJob implements Jobby
        * in the final segment.
        */
 
-      if(!config.getPartitionsSpec().isAssumeGrouped()) {
-        final Job groupByJob = new Job(
-            new Configuration(),
-            String.format("%s-determine_cardinality-%s", config.getDataSource(), config.getIntervals())
-        );
-
-        injectSystemProperties(groupByJob);
-        groupByJob.setInputFormatClass(TextInputFormat.class);
-        groupByJob.setMapperClass(DeterminePartitionsGroupByMapper.class);
-        groupByJob.setMapOutputKeyClass(BytesWritable.class);
-        groupByJob.setMapOutputValueClass(BytesWritable.class);
-        groupByJob.setCombinerClass(DeterminePartitionsGroupByCombiner.class);
-        groupByJob.setReducerClass(DeterminePartitionsGroupByReducer.class);
-        groupByJob.setOutputKeyClass(BytesWritable.class);
-        groupByJob.setOutputValueClass(NullWritable.class);
-        groupByJob.setOutputFormatClass(SequenceFileOutputFormat.class);
-        groupByJob.setJarByClass(DetermineNumberOfRowsJob.class);
-
-        config.addInputPaths(groupByJob);
-        config.intoConfiguration(groupByJob);
-        FileOutputFormat.setOutputPath(groupByJob, config.makeGroupedDataDir());
-
-        groupByJob.submit();
-        log.info("Job %s submitted, status available at: %s", groupByJob.getJobName(), groupByJob.getTrackingURL());
-
-        if(!groupByJob.waitForCompletion(true)) {
-          log.error("Job failed: %s", groupByJob.getJobID());
-          return false;
-        }
-      } else {
-        log.info("Skipping group-by job.");
-      }
-
-      /*
-       * Read grouped data and determine appropriate partitions.
-       */
-      final Job dimSelectionJob = new Job(
+      final Job groupByJob = new Job(
           new Configuration(),
-          String.format("%s-determine_partitions_dimselection-%s", config.getDataSource(), config.getIntervals())
+          String.format("%s-determine_cardinality-%s", config.getDataSource(), config.getIntervals())
       );
 
-      dimSelectionJob.getConfiguration().set("io.sort.record.percent", "0.19");
+      injectSystemProperties(groupByJob);
+      groupByJob.setInputFormatClass(TextInputFormat.class);
+      groupByJob.setMapperClass(DeterminePartitionsGroupByMapper.class);
+      groupByJob.setMapOutputKeyClass(BytesWritable.class);
+      groupByJob.setMapOutputValueClass(BytesWritable.class);
+      groupByJob.setCombinerClass(DeterminePartitionsGroupByCombiner.class);
+      groupByJob.setReducerClass(DeterminePartitionsGroupByReducer.class);
+      groupByJob.setOutputKeyClass(BytesWritable.class);
+      groupByJob.setOutputValueClass(LongWritable.class);
+      groupByJob.setOutputFormatClass(SequenceFileOutputFormat.class);
+      groupByJob.setJarByClass(DetermineNumberOfRowsJob.class);
 
-      injectSystemProperties(dimSelectionJob);
+      config.addInputPaths(groupByJob);
+      config.intoConfiguration(groupByJob);
+      FileOutputFormat.setOutputPath(groupByJob, config.makeGroupedDataDir());
 
-      if(!config.getPartitionsSpec().isAssumeGrouped()) {
-        // Read grouped data from the groupByJob.
-        dimSelectionJob.setMapperClass(DeterminePartitionsDimSelectionPostGroupByMapper.class);
-        dimSelectionJob.setInputFormatClass(SequenceFileInputFormat.class);
-        FileInputFormat.addInputPath(dimSelectionJob, config.makeGroupedDataDir());
-      } else {
-        // Directly read the source data, since we assume it's already grouped.
-        dimSelectionJob.setMapperClass(DeterminePartitionsDimSelectionAssumeGroupedMapper.class);
-        dimSelectionJob.setInputFormatClass(TextInputFormat.class);
-        config.addInputPaths(dimSelectionJob);
-      }
+      groupByJob.submit();
+      log.info("Job %s submitted, status available at: %s", groupByJob.getJobName(), groupByJob.getTrackingURL());
 
-      SortableBytes.useSortableBytesAsMapOutputKey(dimSelectionJob);
-      dimSelectionJob.setMapOutputValueClass(Text.class);
-      dimSelectionJob.setCombinerClass(DeterminePartitionsDimSelectionCombiner.class);
-      dimSelectionJob.setReducerClass(DeterminePartitionsDimSelectionReducer.class);
-      dimSelectionJob.setOutputKeyClass(BytesWritable.class);
-      dimSelectionJob.setOutputValueClass(Text.class);
-      dimSelectionJob.setOutputFormatClass(DeterminePartitionsDimSelectionOutputFormat.class);
-      dimSelectionJob.setJarByClass(DetermineNumberOfRowsJob.class);
-      dimSelectionJob.setNumReduceTasks(config.getGranularitySpec().bucketIntervals().size());
-
-      if (!dimSelectionJob.getConfiguration().get("mapred.job.tracker").equals("local")) {
-        dimSelectionJob.setPartitionerClass(DeterminePartitionsDimSelectionPartitioner.class);
-      }
-
-      config.intoConfiguration(dimSelectionJob);
-      FileOutputFormat.setOutputPath(dimSelectionJob, config.makeIntermediatePath());
-
-      dimSelectionJob.submit();
-      log.info(
-          "Job %s submitted, status available at: %s",
-          dimSelectionJob.getJobName(),
-          dimSelectionJob.getTrackingURL()
-      );
-
-      if(!dimSelectionJob.waitForCompletion(true)) {
-        log.error("Job failed: %s", dimSelectionJob.getJobID().toString());
+      if(!groupByJob.waitForCompletion(true)) {
+        log.error("Job failed: %s", groupByJob.getJobID());
         return false;
       }
 
       /*
        * Load partitions determined by the previous job.
        */
+
+
 
       log.info("Job completed, loading up partitions for intervals[%s].", config.getSegmentGranularIntervals());
       FileSystem fileSystem = null;
@@ -228,27 +176,34 @@ public class DetermineNumberOfRowsJob implements Jobby
       for (Interval segmentGranularity : config.getSegmentGranularIntervals()) {
         DateTime bucket = segmentGranularity.getStart();
 
-        final Path partitionInfoPath = config.makeSegmentPartitionInfoPath(new Bucket(0, bucket, 0));
+        final Path outPath = new Path(
+            String.format(
+                "%s/partitions.json",
+                config.makeGroupedDataDir().toString()
+            )
+        );
+
         if (fileSystem == null) {
-          fileSystem = partitionInfoPath.getFileSystem(dimSelectionJob.getConfiguration());
+          fileSystem = outPath.getFileSystem(groupByJob.getConfiguration());
         }
-        if (fileSystem.exists(partitionInfoPath)) {
-          List<ShardSpec> specs = config.jsonMapper.readValue(
-              Utils.openInputStream(dimSelectionJob, partitionInfoPath), new TypeReference<List<ShardSpec>>()
+        if (fileSystem.exists(outPath)) {
+          Long cardinality = config.jsonMapper.readValue(
+              Utils.openInputStream(groupByJob, outPath), new TypeReference<Long>()
           {
           }
           );
 
-          List<HadoopyShardSpec> actualSpecs = Lists.newArrayListWithExpectedSize(specs.size());
-          for (int i = 0; i < specs.size(); ++i) {
-            actualSpecs.add(new HadoopyShardSpec(specs.get(i), shardCount++));
+          int numberOfShards = (int) Math.ceil(cardinality / 100000d);
+          List<HadoopyShardSpec> actualSpecs = Lists.newArrayListWithExpectedSize(numberOfShards);
+          for (int i = 0; i < numberOfShards; ++i) {
+            actualSpecs.add(new HadoopyShardSpec(new NumberedShardSpec(i, numberOfShards), shardCount++));
             log.info("DateTime[%s], partition[%d], spec[%s]", bucket, i, actualSpecs.get(i));
           }
 
           shardSpecs.put(bucket, actualSpecs);
         }
         else {
-          log.info("Path[%s] didn't exist!?", partitionInfoPath);
+          log.info("Path[%s] didn't exist!?", outPath);
         }
       }
       config.setShardSpecs(shardSpecs);
@@ -328,6 +283,21 @@ public class DetermineNumberOfRowsJob implements Jobby
   public static class DeterminePartitionsGroupByReducer
       extends Reducer<BytesWritable, BytesWritable, BytesWritable, LongWritable>
   {
+    protected static volatile HadoopDruidIndexerConfig config = null;
+
+    @Override
+    protected void setup(Context context)
+        throws IOException, InterruptedException
+    {
+      if (config == null) {
+        synchronized (DeterminePartitionsDimSelectionBaseReducer.class) {
+          if (config == null) {
+            config = HadoopDruidIndexerConfig.fromConfiguration(context.getConfiguration());
+          }
+        }
+      }
+    }
+
     @Override
     protected void reduce(
         BytesWritable key,
@@ -347,7 +317,29 @@ public class DetermineNumberOfRowsJob implements Jobby
         }
       }
 
-      context.write(key, new LongWritable(hyperLogLog.cardinality()));
+//      context.write(key, new LongWritable(hyperLogLog.cardinality()));
+
+      final Path outPath = new Path(
+          String.format(
+              "%s/partitions.json",
+              config.makeGroupedDataDir().toString()
+          )
+      );
+
+      final OutputStream out = Utils.makePathAndOutputStream(
+          context, outPath, config.isOverwriteFiles()
+      );
+
+
+      try {
+        HadoopDruidIndexerConfig.jsonMapper.writerWithType(new TypeReference<Long>() {}).writeValue(
+            out,
+            hyperLogLog.cardinality()
+        );
+      }
+      finally {
+        Closeables.close(out, false);
+      }
     }
   }
 
@@ -355,7 +347,7 @@ public class DetermineNumberOfRowsJob implements Jobby
    * This DimSelection mapper runs on data generated by our GroupBy job.
    */
   public static class DeterminePartitionsDimSelectionPostGroupByMapper
-      extends Mapper<BytesWritable, NullWritable, BytesWritable, Text>
+      extends Mapper<BytesWritable, LongWritable, BytesWritable, Text>
   {
     private DeterminePartitionsDimSelectionMapperHelper helper;
 
@@ -370,9 +362,10 @@ public class DetermineNumberOfRowsJob implements Jobby
 
     @Override
     protected void map(
-        BytesWritable key, NullWritable value, Context context
+        BytesWritable key, LongWritable value, Context context
     ) throws IOException, InterruptedException
     {
+      System.out.println(value.get());
       final List<Object> timeAndDims = HadoopDruidIndexerConfig.jsonMapper.readValue(key.getBytes(), List.class);
 
       final DateTime timestamp = new DateTime(timeAndDims.get(0));

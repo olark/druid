@@ -22,12 +22,24 @@ package com.metamx.druid.shard;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSortedSet;
+import com.google.common.collect.Maps;
+import com.google.common.hash.HashFunction;
+import com.google.common.hash.Hashing;
 import com.metamx.druid.input.InputRow;
+import com.metamx.druid.jackson.DefaultObjectMapper;
 import com.metamx.druid.partition.NumberedPartitionChunk;
 import com.metamx.druid.partition.PartitionChunk;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class NumberedShardSpec implements ShardSpec
 {
@@ -36,6 +48,14 @@ public class NumberedShardSpec implements ShardSpec
 
   @JsonIgnore
   final private int partitions;
+
+  private static HashFunction hashFunction = null;
+  public static ObjectMapper jsonMapper;
+
+  static {
+    jsonMapper = new DefaultObjectMapper();
+    jsonMapper.configure(JsonGenerator.Feature.ESCAPE_NON_ASCII, true);
+  }
 
   @JsonCreator
   public NumberedShardSpec(
@@ -47,6 +67,7 @@ public class NumberedShardSpec implements ShardSpec
     Preconditions.checkArgument(partitionNum < partitions, "partitionNum < partitions");
     this.partitionNum = partitionNum;
     this.partitions = partitions;
+    hashFunction = Hashing.murmur3_32();
   }
 
   @JsonProperty("partitionNum")
@@ -71,12 +92,30 @@ public class NumberedShardSpec implements ShardSpec
   @Override
   public boolean isInChunk(Map<String, String> dimensions)
   {
-    return true;
+    throw new UnsupportedOperationException();
   }
 
   @Override
   public boolean isInChunk(InputRow inputRow)
   {
+    final Map<String, Set<String>> dims = Maps.newTreeMap();
+    for(final String dim : inputRow.getDimensions()) {
+      final Set<String> dimValues = ImmutableSortedSet.copyOf(inputRow.getDimension(dim));
+      if(dimValues.size() > 0) {
+        dims.put(dim, dimValues);
+      }
+    }
+    final List<Object> groupKey = ImmutableList.of(
+        inputRow.getTimestampFromEpoch(),
+        dims
+    );
+    try {
+      int x = hashFunction.hashBytes(jsonMapper.writeValueAsBytes(groupKey)).asInt();
+      return Math.abs(x) % partitions == partitionNum;
+    }
+    catch (JsonProcessingException e) {
+      e.printStackTrace();
+    }
     return true;
   }
 }

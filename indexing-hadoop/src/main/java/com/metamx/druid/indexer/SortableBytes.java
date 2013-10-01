@@ -20,6 +20,7 @@
 package com.metamx.druid.indexer;
 
 import com.google.common.base.Charsets;
+import com.google.common.primitives.Ints;
 import org.apache.hadoop.io.BytesWritable;
 import org.apache.hadoop.io.WritableComparator;
 import org.apache.hadoop.mapreduce.Job;
@@ -60,7 +61,7 @@ public class SortableBytes
 
   public byte[] toBytes()
   {
-    ByteBuffer outBytes = ByteBuffer.wrap(new byte[4 + groupKey.length + sortKey.length]);
+    ByteBuffer outBytes = ByteBuffer.wrap(new byte[Ints.BYTES + groupKey.length + sortKey.length]);
     outBytes.putInt(groupKey.length);
     outBytes.put(groupKey);
     outBytes.put(sortKey);

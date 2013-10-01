@@ -45,7 +45,7 @@ public class HadoopDruidIndexerJob implements Jobby
 
   private final HadoopDruidIndexerConfig config;
   private final DbUpdaterJob dbUpdaterJob;
-  private IndexGeneratorJob indexJob;
+  private IndexGeneratorJob2 indexJob;
   private volatile List<DataSegment> publishedSegments = null;
 
   public HadoopDruidIndexerJob(
@@ -85,7 +85,7 @@ public class HadoopDruidIndexerJob implements Jobby
       config.setShardSpecs(shardSpecs);
     }
 
-    indexJob = new IndexGeneratorJob(config);
+    indexJob = new IndexGeneratorJob2(config);
     jobs.add(indexJob);
 
     if (dbUpdaterJob != null) {
@@ -158,7 +158,7 @@ public class HadoopDruidIndexerJob implements Jobby
     return publishedSegments;
   }
 
-  public IndexGeneratorJob.IndexGeneratorStats getIndexJobStats()
+  public IndexGeneratorJob2.IndexGeneratorStats getIndexJobStats()
   {
     return indexJob.getJobStats();
   }
