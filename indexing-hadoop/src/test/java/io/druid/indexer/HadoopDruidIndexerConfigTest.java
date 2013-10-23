@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import io.druid.db.DbConnectorConfig;
+import io.druid.granularity.DurationGranularity;
 import io.druid.indexer.granularity.UniformGranularitySpec;
 import io.druid.indexer.partitions.PartitionsSpec;
 import io.druid.indexer.updater.DbUpdaterJobSpec;
@@ -70,8 +71,8 @@ public class HadoopDruidIndexerConfigTest
 
     Assert.assertEquals(
         "getGranularity",
-        "HOUR",
-        granularitySpec.getGranularity().toString()
+        new DurationGranularity(3600 * 1000L, new DateTime(0)),
+        granularitySpec.getGranularity()
     );
   }
 
@@ -104,8 +105,8 @@ public class HadoopDruidIndexerConfigTest
 
     Assert.assertEquals(
         "getGranularity",
-        "DAY",
-        granularitySpec.getGranularity().toString()
+        new DurationGranularity(86400 * 1000L, new DateTime(0)),
+        granularitySpec.getGranularity()
     );
   }
 

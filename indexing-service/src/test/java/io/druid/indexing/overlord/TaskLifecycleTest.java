@@ -200,7 +200,7 @@ public class TaskLifecycleTest
     final Task indexTask = new IndexTask(
         null,
         "foo",
-        new UniformGranularitySpec(Granularity.DAY, ImmutableList.of(new Interval("2010-01-01/P2D"))),
+        new UniformGranularitySpec(QueryGranularity.DAY, ImmutableList.of(new Interval("2010-01-01/P2D"))),
         null,
         new AggregatorFactory[]{new DoubleSumAggregatorFactory("met", "met")},
         QueryGranularity.NONE,
@@ -255,7 +255,7 @@ public class TaskLifecycleTest
     final Task indexTask = new IndexTask(
         null,
         "foo",
-        new UniformGranularitySpec(Granularity.DAY, ImmutableList.of(new Interval("2010-01-01/P1D"))),
+        new UniformGranularitySpec(QueryGranularity.DAY, ImmutableList.of(new Interval("2010-01-01/P1D"))),
         null,
         new AggregatorFactory[]{new DoubleSumAggregatorFactory("met", "met")},
         QueryGranularity.NONE,

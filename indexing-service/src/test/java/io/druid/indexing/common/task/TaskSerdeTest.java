@@ -51,7 +51,7 @@ public class TaskSerdeTest
     final Task task = new IndexTask(
         null,
         "foo",
-        new UniformGranularitySpec(Granularity.DAY, ImmutableList.of(new Interval("2010-01-01/P2D"))),
+        new UniformGranularitySpec(QueryGranularity.DAY, ImmutableList.of(new Interval("2010-01-01/P2D"))),
         null,
         new AggregatorFactory[]{new DoubleSumAggregatorFactory("met", "met")},
         QueryGranularity.NONE,
@@ -343,7 +343,7 @@ public class TaskSerdeTest
             "foo",
             new TimestampSpec("timestamp", "auto"),
             new JSONDataSpec(ImmutableList.of("foo"), null),
-            new UniformGranularitySpec(Granularity.DAY, ImmutableList.of(new Interval("2010-01-01/P1D"))),
+            new UniformGranularitySpec(QueryGranularity.DAY, ImmutableList.of(new Interval("2010-01-01/P1D"))),
             ImmutableMap.<String, Object>of("paths", "bar"),
             null,
             null,

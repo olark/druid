@@ -30,7 +30,6 @@ import java.io.IOException;
  */
 @JsonTypeInfo(use= JsonTypeInfo.Id.NAME, property="type")
 @JsonSubTypes(value={
-    @JsonSubTypes.Type(name="granular_unprocessed", value=GranularUnprocessedPathSpec.class),
     @JsonSubTypes.Type(name="granularity", value=GranularityPathSpec.class),
     @JsonSubTypes.Type(name="static", value=StaticPathSpec.class)
 })

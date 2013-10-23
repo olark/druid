@@ -23,9 +23,8 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import com.metamx.common.Granularity;
+import io.druid.granularity.QueryGranularity;
 import org.joda.time.DateTime;
 import org.joda.time.Interval;
 
@@ -34,20 +33,23 @@ import java.util.SortedSet;
 
 public class UniformGranularitySpec implements GranularitySpec
 {
-  final private Granularity granularity;
+  final private QueryGranularity granularity;
   final private List<Interval> inputIntervals;
   final private ArbitraryGranularitySpec wrappedSpec;
 
   @JsonCreator
   public UniformGranularitySpec(
-      @JsonProperty("gran") Granularity granularity,
+      @JsonProperty("gran") QueryGranularity granularity,
       @JsonProperty("intervals") List<Interval> inputIntervals
   )
   {
     List<Interval> granularIntervals = Lists.newArrayList();
 
-    for (Interval inputInterval : inputIntervals) {
-      Iterables.addAll(granularIntervals,  granularity.getIterable(inputInterval));
+    for (final Interval inputInterval : inputIntervals) {
+      for (final Long start : granularity.iterable(inputInterval.getStartMillis(), inputInterval.getEndMillis())) {
+        final Interval granularInterval = new Interval(start, granularity.next(start));
+        granularIntervals.add(granularInterval);
+      }
     }
 
     this.granularity = granularity;
@@ -68,7 +70,7 @@ public class UniformGranularitySpec implements GranularitySpec
   }
 
   @JsonProperty("gran")
-  public Granularity getGranularity()
+  public QueryGranularity getGranularity()
   {
     return granularity;
   }

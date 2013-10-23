@@ -45,6 +45,7 @@ import io.druid.data.input.impl.DataSpec;
 import io.druid.data.input.impl.StringInputRowParser;
 import io.druid.data.input.impl.TimestampSpec;
 import io.druid.data.input.impl.ToLowercaseDataSpec;
+import io.druid.granularity.QueryGranularity;
 import io.druid.guice.JsonConfigProvider;
 import io.druid.guice.annotations.Self;
 import io.druid.indexer.granularity.GranularitySpec;
@@ -150,7 +151,7 @@ public class HadoopDruidIndexerConfig
       final @JsonProperty("timestampColumn") String timestampColumn,
       final @JsonProperty("timestampFormat") String timestampFormat,
       final @JsonProperty("intervals") List<Interval> intervals,
-      final @JsonProperty("segmentGranularity") Granularity segmentGranularity,
+      final @JsonProperty("segmentGranularity") QueryGranularity segmentGranularity,
       final @JsonProperty("partitionDimension") String partitionDimension,
       final @JsonProperty("targetPartitionSize") Long targetPartitionSize
   )
