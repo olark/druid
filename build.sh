@@ -15,6 +15,9 @@ echo Using Version[${VERSION}]
 
 mvn clean
 mvn package
+mv services/target/*.jar ./
+mvn clean
+mv *.jar services/
 
 if [ $? -ne "0" ]; then
     echo "mvn package failed"
