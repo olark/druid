@@ -3,7 +3,6 @@ Olark Druid repo only supplies upstart scripts!
 To update:
 - Build druid from metamx/druid
 - Copy services/target/druid-services-*-SNAPSHOT-selfcontained.jar to services/druid-services-selfcontained.jar under Olark repo
-- Update file version in puppet
 
 ------------------------------------------------------------------
 The best place for more Druid resources is at: http://www.druid.io
